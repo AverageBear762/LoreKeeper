@@ -1,0 +1,416 @@
+"""
+LoreKeeper — Main Window.
+
+Top-level application window with:
+- Menu bar (File, Edit, View, Help)
+- Toolbar (New, Save, Undo, Redo, Theme toggle, Search)
+- Sidebar with search, category tree, favorites, recent, travel map link
+- Central article view area with read/edit modes
+- Status bar
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
+
+from database import crud
+from database.manager import DatabaseManager
+from database.models import Article
+from ui.article_view import ArticleView
+from ui.sidebar import Sidebar
+from ui.theme import ThemeManager
+
+
+class MainWindow(QMainWindow):
+    """LoreKeeper main application window."""
+
+    APP_TITLE = "LoreKeeper — Worldbuilding Wiki"
+
+    def __init__(self, theme_mgr: ThemeManager) -> None:
+        super().__init__()
+        self.theme = theme_mgr
+        self._autosave_timer = QTimer(self)
+        self._db: Optional[DatabaseManager] = None
+
+        self.setWindowTitle(self.APP_TITLE)
+        self.setMinimumSize(1024, 680)
+        self.resize(1280, 800)
+
+        self._build_menu_bar()
+        self._build_toolbar()
+        self._build_central()
+        self._build_status_bar()
+
+        # Keyboard shortcuts
+        self._setup_shortcuts()
+
+        # Autosave every 30 seconds
+        self._autosave_timer.setInterval(30_000)
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_timer.start()
+
+    # ------------------------------------------------------------------
+    # Builders
+    # ------------------------------------------------------------------
+
+    def _build_menu_bar(self) -> None:
+        menubar = self.menuBar()
+
+        # -- File --
+        file_menu = menubar.addMenu("&File")
+        self.act_new = QAction("&New Article", self)
+        self.act_new.setShortcut(QKeySequence("Ctrl+N"))
+        self.act_new.triggered.connect(self._on_new_article)
+        file_menu.addAction(self.act_new)
+
+        self.act_save = QAction("&Save", self)
+        self.act_save.setShortcut(QKeySequence("Ctrl+S"))
+        self.act_save.triggered.connect(self._on_save)
+        file_menu.addAction(self.act_save)
+
+        self.act_save_as = QAction("Save &As...", self)
+        self.act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.act_save_as.triggered.connect(self._on_save_as)
+        file_menu.addAction(self.act_save_as)
+
+        file_menu.addSeparator()
+
+        self.act_open_db = QAction("&Open Database...", self)
+        self.act_open_db.setShortcut(QKeySequence("Ctrl+O"))
+        self.act_open_db.triggered.connect(self._on_open_database)
+        file_menu.addAction(self.act_open_db)
+
+        file_menu.addSeparator()
+
+        self.act_quit = QAction("&Quit", self)
+        self.act_quit.setShortcut(QKeySequence("Ctrl+Q"))
+        self.act_quit.triggered.connect(self.close)
+        file_menu.addAction(self.act_quit)
+
+        # -- Edit --
+        edit_menu = menubar.addMenu("&Edit")
+        self.act_undo = QAction("&Undo", self)
+        self.act_undo.setShortcut(QKeySequence("Ctrl+Z"))
+        edit_menu.addAction(self.act_undo)
+
+        self.act_redo = QAction("&Redo", self)
+        self.act_redo.setShortcut(QKeySequence("Ctrl+Y"))
+        edit_menu.addAction(self.act_redo)
+
+        edit_menu.addSeparator()
+
+        self.act_delete = QAction("&Delete Article", self)
+        self.act_delete.setShortcut(QKeySequence("Del"))
+        self.act_delete.triggered.connect(self._on_delete_article)
+        edit_menu.addAction(self.act_delete)
+
+        # -- View --
+        view_menu = menubar.addMenu("&View")
+        self.act_toggle_theme = QAction("Toggle &Dark Mode", self)
+        self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+D"))
+        self.act_toggle_theme.triggered.connect(self._on_toggle_theme)
+        view_menu.addAction(self.act_toggle_theme)
+
+        view_menu.addSeparator()
+
+        self.act_travel_map = QAction("&Travel Map", self)
+        self.act_travel_map.setShortcut(QKeySequence("Ctrl+M"))
+        self.act_travel_map.triggered.connect(self._on_travel_map)
+        view_menu.addAction(self.act_travel_map)
+
+        # -- Help --
+        help_menu = menubar.addMenu("&Help")
+        self.act_about = QAction("&About LoreKeeper", self)
+        self.act_about.triggered.connect(self._on_about)
+        help_menu.addAction(self.act_about)
+
+    def _build_toolbar(self) -> None:
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setObjectName("MainToolbar")
+        toolbar.setMovable(False)
+        toolbar.setIconSize(self.font().pointSize() * 2)
+        self.addToolBar(toolbar)
+
+        # Tool buttons
+        self.tb_new = QPushButton("📄 New")
+        self.tb_new.setObjectName("ToolBtn")
+        self.tb_new.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_new.clicked.connect(self._on_new_article)
+        toolbar.addWidget(self.tb_new)
+
+        self.tb_save = QPushButton("💾 Save")
+        self.tb_save.setObjectName("ToolBtn")
+        self.tb_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_save.clicked.connect(self._on_save)
+        toolbar.addWidget(self.tb_save)
+
+        toolbar.addSeparator()
+
+        self.tb_undo = QPushButton("↩ Undo")
+        self.tb_undo.setObjectName("ToolBtn")
+        self.tb_undo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_undo.clicked.connect(self._on_undo)
+        toolbar.addWidget(self.tb_undo)
+
+        self.tb_redo = QPushButton("↪ Redo")
+        self.tb_redo.setObjectName("ToolBtn")
+        self.tb_redo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_redo.clicked.connect(self._on_redo)
+        toolbar.addWidget(self.tb_redo)
+
+        toolbar.addSeparator()
+
+        self.tb_theme = QPushButton("🌓 Theme")
+        self.tb_theme.setObjectName("ToolBtn")
+        self.tb_theme.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_theme.clicked.connect(self._on_toggle_theme)
+        toolbar.addWidget(self.tb_theme)
+
+        toolbar.addSeparator()
+
+        self.tb_map = QPushButton("🗺 Map")
+        self.tb_map.setObjectName("ToolBtn")
+        self.tb_map.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tb_map.clicked.connect(self._on_travel_map)
+        toolbar.addWidget(self.tb_map)
+
+        # Spacer
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # Quick search in toolbar
+        self.toolbar_search = QPushButton("🔍 Search")
+        self.toolbar_search.setObjectName("ToolBtn")
+        self.toolbar_search.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toolbar_search.clicked.connect(lambda: self.sidebar.search_bar.setFocus())
+        toolbar.addWidget(self.toolbar_search)
+
+    def _build_central(self) -> None:
+        """Build the main content area with sidebar + article view."""
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Splitter for resizable sidebar/content
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1)
+        splitter.setChildrenCollapsible(False)
+
+        # Sidebar
+        self.sidebar = Sidebar()
+        splitter.addWidget(self.sidebar)
+
+        # Article view (central)
+        self.article_view = ArticleView()
+        splitter.addWidget(self.article_view)
+
+        # Set proportions: 260px sidebar, rest for content
+        splitter.setSizes([260, 1020])
+
+        layout.addWidget(splitter)
+
+        # Connect signals
+        self.sidebar.article_selected.connect(self.article_view.load_article_by_id)
+        self.sidebar.search_requested.connect(self._on_global_search)
+        self.sidebar.travel_map_requested.connect(self._on_travel_map)
+        self.sidebar.create_article_requested.connect(self._on_new_article)
+
+    def _build_status_bar(self) -> None:
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_label = QLabel("Ready")
+        self.status_bar.addWidget(self.status_label)
+
+        # DB status
+        self.db_status_label = QLabel("")
+        self.db_status_label.setStyleSheet("color: #6c757d; margin-right: 8px;")
+        self.status_bar.addPermanentWidget(self.db_status_label)
+
+    def _setup_shortcuts(self) -> None:
+        """Additional keyboard shortcuts beyond menu actions."""
+        # Escape to blur search
+        from PySide6.QtGui import QShortcut
+        esc = QShortcut(QKeySequence("Escape"), self)
+        esc.activated.connect(self.sidebar.clear_search)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def open_database(self, db_path: str) -> None:
+        """Open a LoreKeeper database file and refresh the UI."""
+        db = DatabaseManager()
+        db.open(db_path)
+        self._db = db
+        self._update_db_status()
+        self.refresh_ui()
+
+    def refresh_ui(self) -> None:
+        """Refresh all sidebar lists and tree."""
+        self.sidebar.refresh_favorites()
+        self.sidebar.refresh_recent()
+        self.sidebar.refresh_category_tree()
+        self.status_label.setText("Database loaded")
+
+    # ------------------------------------------------------------------
+    # Slots — actions
+    # ------------------------------------------------------------------
+
+    def _on_new_article(self) -> None:
+        """Create a new article and open it for editing."""
+        article = self.article_view.create_new("Location")
+        self.status_label.setText(f"New article created: {article.id[:8]}...")
+        self.sidebar.refresh_recent()
+        self.sidebar.refresh_favorites()
+
+    def _on_save(self) -> None:
+        """Save the current article."""
+        if self.article_view.save():
+            self.status_label.setText("Article saved")
+            self.sidebar.refresh_recent()
+        else:
+            self.status_label.setText("Save failed")
+
+    def _on_save_as(self) -> None:
+        """Export the current article content as a Markdown file."""
+        article = self.article_view.current_article
+        if not article:
+            self.status_label.setText("No article to export")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Article",
+            f"{article.title.replace(' ', '_')}.md",
+            "Markdown (*.md);;All Files (*)",
+        )
+        if path:
+            try:
+                with open(path, "w") as f:
+                    f.write(f"# {article.title}\n\n{article.content}")
+                self.status_label.setText(f"Exported to {Path(path).name}")
+            except OSError as e:
+                QMessageBox.warning(self, "Export Error", str(e))
+
+    def _on_open_database(self) -> None:
+        """Open a different database file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open LoreKeeper Database",
+            str(Path.home()),
+            "SQLite Database (*.db *.sqlite);;All Files (*)",
+        )
+        if path:
+            try:
+                self.open_database(path)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not open database:\n{e}")
+
+    def _on_delete_article(self) -> None:
+        """Delete the currently displayed article."""
+        article = self.article_view.current_article
+        if not article:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Delete Article",
+            f'Are you sure you want to delete "{article.title}"?\n'
+            "This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            crud.delete_article(article.id)
+            self.article_view.clear()
+            self.status_label.setText(f"Deleted: {article.title}")
+            self.sidebar.refresh_favorites()
+            self.sidebar.refresh_recent()
+
+    def _on_toggle_theme(self) -> None:
+        new_theme = self.theme.toggle()
+        self.act_toggle_theme.setText(
+            "Toggle &Light Mode" if new_theme == "dark" else "Toggle &Dark Mode"
+        )
+        self.status_label.setText(f"Switched to {new_theme} theme")
+
+    def _on_travel_map(self) -> None:
+        """Placeholder: switch to travel map mode."""
+        self.status_label.setText("🗺 Travel Map — coming soon in a future update")
+
+    def _on_undo(self) -> None:
+        """Undo the last edit in the article view."""
+        self.article_view.content_edit.undo()
+        self.status_label.setText("Undo")
+
+    def _on_redo(self) -> None:
+        """Redo the last undone edit."""
+        self.article_view.content_edit.redo()
+        self.status_label.setText("Redo")
+
+    def _on_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About LoreKeeper",
+            "<h2>LoreKeeper</h2>"
+            "<p>Version 0.1.0</p>"
+            "<p>A fully offline, local-first worldbuilding database and wiki<br>"
+            "for tabletop RPG game masters, writers, and creators.</p>"
+            "<p>Built with Python, PySide6, and SQLite FTS5.</p>"
+            "<p>© 2026 LoreKeeper Team</p>",
+        )
+
+    def _on_global_search(self, query: str) -> None:
+        """Perform a full-text search and show results."""
+        results = crud.search_articles(query)
+        if not results:
+            self.status_label.setText(f"No results for '{query}'")
+            self.article_view.show_placeholder()
+            return
+
+        self.status_label.setText(f"Found {len(results)} result(s) for '{query}'")
+        # Load the first result
+        self.article_view.load_article(results[0])
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _autosave(self) -> None:
+        """Autosave the current article if it has unsaved changes."""
+        if self.article_view.is_dirty:
+            self.article_view.save()
+
+    def _update_db_status(self) -> None:
+        if self._db and self._db.db_path:
+            name = Path(self._db.db_path).name
+            self.db_status_label.setText(f"DB: {name}")
+
+    def closeEvent(self, event) -> None:
+        """Handle window close — autosave before exiting."""
+        self._autosave_timer.stop()
+        if self.article_view.is_dirty:
+            self.article_view.save()
+        event.accept()
