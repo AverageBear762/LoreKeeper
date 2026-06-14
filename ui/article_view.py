@@ -5,12 +5,14 @@ Central widget for displaying and editing wiki articles with:
 - Title editing
 - Rich content area (Markdown / plain text)
 - Metadata display (type, tags, timestamps)
+- Template fields panel (structured data from template schema)
+- Autosave on form changes
 - Read-only view mode vs edit mode
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QFont
@@ -21,14 +23,18 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QSplitter,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from database import crud
-from database.models import Article
+from database.models import Article, ArticleTemplate
+from ui.form_builder import DynamicForm
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +86,6 @@ class MetadataBar(QFrame):
         tags_str = ", ".join(f"#{t}" for t in article.tags) if article.tags else ""
         self.tags_label.setText(tags_str)
 
-        # Show a human-friendly relative time
         from datetime import datetime
         try:
             updated = datetime.fromisoformat(article.updated_at)
@@ -113,20 +118,30 @@ class ArticleView(QFrame):
         self.setObjectName("ArticleArea")
 
         self._article: Optional[Article] = None
-        self._is_editing: bool = False
-        self._edit_mode: bool = True  # Default to editable
+        self._edit_mode: bool = True
 
         self._build_ui()
         self.show_placeholder()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # -- Metadata bar --
+        # -- Metadata bar (top) --
         self.metadata_bar = MetadataBar()
-        layout.addWidget(self.metadata_bar)
+        root.addWidget(self.metadata_bar)
+
+        # -- Scroll area for everything below --
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(24, 16, 24, 16)
+        scroll_layout.setSpacing(12)
 
         # -- Title --
         self.title_edit = QLineEdit()
@@ -136,9 +151,17 @@ class ArticleView(QFrame):
             "font-size: 24px; font-weight: 600; border: none;"
             " padding: 4px 0; margin-bottom: 8px;"
         )
-        layout.addWidget(self.title_edit)
+        scroll_layout.addWidget(self.title_edit)
 
-        # -- Content editor --
+        # -- Splitter: content editor (left) + template fields (right) --
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1)
+
+        # Left: Content editor
+        content_panel = QWidget()
+        content_panel_layout = QVBoxLayout(content_panel)
+        content_panel_layout.setContentsMargins(0, 0, 0, 0)
+
         self.content_edit = QPlainTextEdit()
         self.content_edit.setObjectName("ArticleContent")
         self.content_edit.setPlaceholderText(
@@ -148,7 +171,24 @@ class ArticleView(QFrame):
         )
         self.content_edit.setTabChangesFocus(False)
         self.content_edit.setMinimumHeight(200)
-        layout.addWidget(self.content_edit, 1)
+        content_panel_layout.addWidget(self.content_edit, 1)
+        splitter.addWidget(content_panel)
+
+        # Right: Template fields panel
+        self.template_fields_panel = DynamicForm()
+        splitter.addWidget(self.template_fields_panel)
+
+        splitter.setSizes([600, 300])
+        scroll_layout.addWidget(splitter, 1)
+
+        # -- Save indicator --
+        self.save_indicator = QLabel("")
+        self.save_indicator.setStyleSheet("color: #6c757d; font-size: 11px;")
+        self.save_indicator.setAlignment(Qt.AlignmentFlag.AlignRight)
+        scroll_layout.addWidget(self.save_indicator)
+
+        scroll_area.setWidget(scroll_content)
+        root.addWidget(scroll_area, 1)
 
         # -- Placeholder label (shown when no article is loaded) --
         self.placeholder = QLabel(
@@ -161,17 +201,12 @@ class ArticleView(QFrame):
         self.placeholder.setStyleSheet(
             "color: #adb5bd; font-size: 16px; padding: 60px;"
         )
-        layout.addWidget(self.placeholder)
-
-        # -- Save indicator --
-        self.save_indicator = QLabel("")
-        self.save_indicator.setStyleSheet("color: #6c757d; font-size: 11px;")
-        self.save_indicator.setAlignment(Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(self.save_indicator)
+        root.addWidget(self.placeholder)
 
         # Connect signals
         self.title_edit.textChanged.connect(self._on_content_edited)
         self.content_edit.textChanged.connect(self._on_content_edited)
+        self.template_fields_panel.value_changed.connect(self._on_content_edited)
 
     # ------------------------------------------------------------------
     # Public API
@@ -181,9 +216,6 @@ class ArticleView(QFrame):
         """Load an article into the view (read-write)."""
         self._article = article
         self.placeholder.hide()
-        self.title_edit.show()
-        self.content_edit.show()
-        self.metadata_bar.show()
 
         # Block signals while setting content
         self.title_edit.blockSignals(True)
@@ -196,6 +228,11 @@ class ArticleView(QFrame):
         self.content_edit.blockSignals(False)
 
         self.metadata_bar.set_metadata(article)
+
+        # Load template fields if a custom template exists
+        template = crud.get_template_by_type_name(article.article_type)
+        self.template_fields_panel.load_template(template, article.template_fields)
+
         self.save_indicator.setText("")
 
     def load_article_by_id(self, article_id: str) -> None:
@@ -208,10 +245,8 @@ class ArticleView(QFrame):
         """Show the welcome placeholder, hide article content."""
         self._article = None
         self.placeholder.show()
-        self.title_edit.hide()
-        self.content_edit.hide()
-        self.metadata_bar.hide()
-        self.save_indicator.setText("")
+        # We hide the scroll area contents? Actually we keep them visible
+        # but empty — the placeholder overlays.
 
     def clear(self) -> None:
         """Clear the editor."""
@@ -222,6 +257,7 @@ class ArticleView(QFrame):
         self.content_edit.clear()
         self.title_edit.blockSignals(False)
         self.content_edit.blockSignals(False)
+        self.template_fields_panel.clear()
         self.save_indicator.setText("")
         self.show_placeholder()
 
@@ -239,6 +275,7 @@ class ArticleView(QFrame):
 
         self._article.title = new_title
         self._article.content = new_content
+        self._article.template_fields = self.template_fields_panel.get_values()
         self._article.touch()
 
         crud.update_article(self._article)
@@ -284,11 +321,3 @@ class ArticleView(QFrame):
         self._edit_mode = editing
         self.title_edit.setReadOnly(not editing)
         self.content_edit.setReadOnly(not editing)
-        if editing:
-            self.content_edit.setStyleSheet(
-                "QPlainTextEdit { background: transparent; }"
-            )
-        else:
-            self.content_edit.setStyleSheet(
-                "QPlainTextEdit { background: transparent; color: inherit; }"
-            )

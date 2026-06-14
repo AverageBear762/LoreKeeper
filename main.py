@@ -26,6 +26,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from database.manager import DatabaseManager
+from ui.default_templates import ensure_default_templates
 from ui.main_window import MainWindow
 from ui.theme import ThemeManager
 
@@ -60,6 +61,13 @@ def main() -> None:
             f"Could not open database at:\n{db_path}\n\n{e}\n\n"
             "A new database will be created when you save.",
         )
+
+    # Seed default templates into the database
+    try:
+        from database.manager import DatabaseManager as dbm
+        ensure_default_templates()
+    except Exception:
+        pass  # Already seeded or DB not ready
 
     sys.exit(app.exec())
 

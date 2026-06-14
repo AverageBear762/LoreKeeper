@@ -37,6 +37,7 @@ from database.manager import DatabaseManager
 from database.models import Article
 from ui.article_view import ArticleView
 from ui.sidebar import Sidebar
+from ui.template_editor import TemplateManagementDialog
 from ui.theme import ThemeManager
 
 
@@ -139,6 +140,18 @@ class MainWindow(QMainWindow):
 
         # -- Help --
         help_menu = menubar.addMenu("&Help")
+
+        # -- Templates menu --
+        templates_menu = menubar.addMenu("&Templates")
+        self.act_manage_templates = QAction("&Manage Templates...", self)
+        self.act_manage_templates.triggered.connect(self._on_manage_templates)
+        templates_menu.addAction(self.act_manage_templates)
+        templates_menu.addSeparator()
+        self.act_seed_templates = QAction("&Restore Default Templates", self)
+        self.act_seed_templates.triggered.connect(self._on_seed_templates)
+        templates_menu.addAction(self.act_seed_templates)
+
+        # -- Help --
         self.act_about = QAction("&About LoreKeeper", self)
         self.act_about.triggered.connect(self._on_about)
         help_menu.addAction(self.act_about)
@@ -279,11 +292,35 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_new_article(self) -> None:
-        """Create a new article and open it for editing."""
-        article = self.article_view.create_new("Location")
-        self.status_label.setText(f"New article created: {article.id[:8]}...")
-        self.sidebar.refresh_recent()
-        self.sidebar.refresh_favorites()
+        """Create a new article — first select its type."""
+        from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QVBoxLayout, QLabel
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Article")
+        dialog.setMinimumWidth(360)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Select article type:"))
+
+        combo = QComboBox()
+        types = crud.list_all_article_types()
+        combo.addItems(types)
+        combo.setCurrentText("Location")
+        layout.addWidget(combo)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            article_type = combo.currentText()
+            article = self.article_view.create_new(article_type)
+            self.status_label.setText(f"New {article_type}: {article.id[:8]}...")
+            self.sidebar.refresh_recent()
+            self.sidebar.refresh_favorites()
 
     def _on_save(self) -> None:
         """Save the current article."""
@@ -359,6 +396,29 @@ class MainWindow(QMainWindow):
     def _on_travel_map(self) -> None:
         """Placeholder: switch to travel map mode."""
         self.status_label.setText("🗺 Travel Map — coming soon in a future update")
+
+    def _on_manage_templates(self) -> None:
+        """Open the template management dialog."""
+        dialog = TemplateManagementDialog(self)
+        dialog.templates_changed.connect(self.sidebar.refresh_category_tree)
+        dialog.exec()
+        self.sidebar.refresh_category_tree()
+
+    def _on_seed_templates(self) -> None:
+        """Restore default templates."""
+        from ui.default_templates import seed_default_templates
+        result = QMessageBox.question(
+            self,
+            "Restore Default Templates",
+            "This will update existing default templates (Character, Item, Location, Creature).\n"
+            "Custom templates will not be affected.\n\n"
+            "Proceed?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            count = len(seed_default_templates(overwrite=True))
+            self.status_label.setText(f"Restored {count} default templates")
+            self.sidebar.refresh_category_tree()
 
     def _on_undo(self) -> None:
         """Undo the last edit in the article view."""

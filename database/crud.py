@@ -218,13 +218,20 @@ def get_template_by_type_name(type_name: str) -> Optional[ArticleTemplate]:
 
 
 def list_all_article_types() -> list[str]:
-    """Return all available article types: built-in + custom."""
+    """Return all available article types: built-in + custom, deduplicated."""
     from database.models import BUILTIN_ARTICLE_TYPES
     custom = DatabaseManager().fetchall(
         "SELECT type_name FROM article_templates ORDER BY type_name"
     )
     custom_names = [r["type_name"] for r in custom]
-    return sorted(BUILTIN_ARTICLE_TYPES) + custom_names
+    # Merge — custom templates override built-in if they share a name
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in sorted(BUILTIN_ARTICLE_TYPES) + custom_names:
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
 
 
 def update_template(template: ArticleTemplate) -> ArticleTemplate:
