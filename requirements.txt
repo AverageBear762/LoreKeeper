@@ -1,0 +1,9 @@
+# LoreKeeper — Core dependencies
+PySide6>=6.6.0
+Pillow>=10.0.0
+
+# Optional: cross-platform appdirs for default DB path
+appdirs>=1.4.4
+
+# Packaging (install manually for PyInstaller build)
+# pyinstaller>=6.0.0
