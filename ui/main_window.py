@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QToolBar,
     QVBoxLayout,
@@ -39,6 +40,7 @@ from ui.article_view import ArticleView
 from ui.sidebar import Sidebar
 from ui.template_editor import TemplateManagementDialog
 from ui.theme import ThemeManager
+from ui.travel_map import TravelMapWidget
 
 
 class MainWindow(QMainWindow):
@@ -219,7 +221,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.toolbar_search)
 
     def _build_central(self) -> None:
-        """Build the main content area with sidebar + article view."""
+        """Build the main content area with sidebar + stacked views."""
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
@@ -235,9 +237,18 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         splitter.addWidget(self.sidebar)
 
+        # Stacked widget: index 0 = article view, index 1 = travel map
+        self.view_stack = QStackedWidget()
+
         # Article view (central)
         self.article_view = ArticleView()
-        splitter.addWidget(self.article_view)
+        self.view_stack.addWidget(self.article_view)
+
+        # Travel map
+        self.travel_map = TravelMapWidget()
+        self.view_stack.addWidget(self.travel_map)
+
+        splitter.addWidget(self.view_stack)
 
         # Set proportions: 260px sidebar, rest for content
         splitter.setSizes([260, 1020])
@@ -247,8 +258,12 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.sidebar.article_selected.connect(self.article_view.load_article_by_id)
         self.sidebar.search_requested.connect(self._on_global_search)
-        self.sidebar.travel_map_requested.connect(self._on_travel_map)
+        self.sidebar.travel_map_requested.connect(self._switch_to_travel_map)
         self.sidebar.create_article_requested.connect(self._on_new_article)
+
+        # Travel map signals
+        self.travel_map.article_navigated.connect(self._on_travel_map_navigate)
+        self.travel_map.article_edit_requested.connect(self._on_travel_map_edit)
 
         # Wiki link signals from article view
         self.article_view.link_navigated.connect(self._on_article_link_navigated)
@@ -398,8 +413,31 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Switched to {new_theme} theme")
 
     def _on_travel_map(self) -> None:
-        """Placeholder: switch to travel map mode."""
-        self.status_label.setText("🗺 Travel Map — coming soon in a future update")
+        """Alias for _switch_to_travel_map (called from sidebar)."""
+        self._switch_to_travel_map()
+
+    def _switch_to_travel_map(self) -> None:
+        """Switch to the travel map view."""
+        self.view_stack.setCurrentIndex(1)
+        self.travel_map.reload()
+        self.status_label.setText("🗺 Travel Map")
+        self.sidebar.hide()
+
+    def _switch_to_article_view(self) -> None:
+        """Switch back to the article view."""
+        self.view_stack.setCurrentIndex(0)
+        self.sidebar.show()
+        self.status_label.setText("Wiki View")
+
+    def _on_travel_map_navigate(self, article_id: str) -> None:
+        """Navigate from travel map to an article."""
+        self._switch_to_article_view()
+        self.article_view.load_article_by_id(article_id)
+
+    def _on_travel_map_edit(self, article_id: str) -> None:
+        """Open an article for editing from the travel map."""
+        self._switch_to_article_view()
+        self.article_view.load_article_by_id(article_id)
 
     def _on_manage_templates(self) -> None:
         """Open the template management dialog."""
