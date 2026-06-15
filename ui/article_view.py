@@ -3,18 +3,18 @@ LoreKeeper — Article View & Editor.
 
 Central widget for displaying and editing wiki articles with:
 - Title editing
-- Rich content area (Markdown / plain text)
-- Metadata display (type, tags, timestamps)
+- Rendered markdown content with clickable [[wiki links]]
+- Floating hover tooltips over wiki links
+- Backlinks ("What links here?") section
 - Template fields panel (structured data from template schema)
 - Autosave on form changes
-- Read-only view mode vs edit mode
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
@@ -26,8 +26,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -35,10 +33,12 @@ from PySide6.QtWidgets import (
 from database import crud
 from database.models import Article, ArticleTemplate
 from ui.form_builder import DynamicForm
+from ui.hover_preview import HoverPreviewWidget, HoverTracker
+from ui.wiki_links import WikiTextBrowser, find_backlinks
 
 
 # ---------------------------------------------------------------------------
-#  Metadata bar (type, timestamps, tags)
+#  Metadata bar
 # ---------------------------------------------------------------------------
 
 class MetadataBar(QFrame):
@@ -81,7 +81,6 @@ class MetadataBar(QFrame):
         layout.addWidget(self.updated_label)
 
     def set_metadata(self, article: Article) -> None:
-        """Update the metadata display from an Article model."""
         self.type_label.setText(article.article_type)
         tags_str = ", ".join(f"#{t}" for t in article.tags) if article.tags else ""
         self.tags_label.setText(tags_str)
@@ -104,6 +103,79 @@ class MetadataBar(QFrame):
 
 
 # ---------------------------------------------------------------------------
+#  BacklinksSection
+# ---------------------------------------------------------------------------
+
+class BacklinksSection(QFrame):
+    """Shows 'What links here?' — articles that link to the current one."""
+
+    article_selected = Signal(str)  # article_id
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("BacklinksSection")
+        self.setStyleSheet("""
+            #BacklinksSection {
+                border-top: 1px solid palette(Midlight);
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(4)
+
+        header = QLabel("🔗 What links here?")
+        header.setStyleSheet(
+            "font-size: 12px; font-weight: 600; color: palette(Text);"
+        )
+        layout.addWidget(header)
+
+        self.links_list = QVBoxLayout()
+        self.links_list.setSpacing(2)
+        layout.addLayout(self.links_list)
+
+        self.empty_label = QLabel("No other articles link to this page.")
+        self.empty_label.setStyleSheet("font-size: 11px; color: palette(Mid);")
+        self.empty_label.setContentsMargins(12, 0, 0, 0)
+        layout.addWidget(self.empty_label)
+
+    def set_article(self, article: Optional[Article]) -> None:
+        """Load backlinks for the given article."""
+        self._clear_links()
+        if not article or not article.title:
+            self.empty_label.show()
+            return
+
+        backlinks = find_backlinks(article.title)
+        if not backlinks:
+            self.empty_label.show()
+            return
+
+        self.empty_label.hide()
+        for bl in backlinks:
+            link = QPushButton(f"📄 {bl.title}")
+            link.setFlat(True)
+            link.setCursor(Qt.CursorShape.PointingHandCursor)
+            link.setStyleSheet(
+                "QPushButton { text-align: left; padding: 2px 12px;"
+                "  font-size: 12px; color: palette(Link); border: none; }"
+                "QPushButton:hover { background: palette(AlternateBase);"
+                "  border-radius: 4px; }"
+            )
+            link.clicked.connect(lambda checked, aid=bl.id: self.article_selected.emit(aid))
+            self.links_list.addWidget(link)
+
+    def _clear_links(self) -> None:
+        while self.links_list.count():
+            item = self.links_list.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        self.empty_label.show()
+
+
+# ---------------------------------------------------------------------------
 #  ArticleView
 # ---------------------------------------------------------------------------
 
@@ -112,6 +184,8 @@ class ArticleView(QFrame):
 
     content_changed = Signal()
     article_updated = Signal(str)  # article_id
+    link_navigated = Signal(str)   # article_id
+    link_creation_requested = Signal(str)  # article_name
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -120,19 +194,28 @@ class ArticleView(QFrame):
         self._article: Optional[Article] = None
         self._edit_mode: bool = True
 
+        # Hover tooltip system
+        self._tooltip = HoverPreviewWidget()
+        self._hover_tracker = HoverTracker(self._tooltip)
+        self._hover_timer_link = QTimer()
+        self._hover_timer_link.setSingleShot(True)
+        self._hover_timer_link.setInterval(200)
+        self._hover_timer_link.timeout.connect(self._on_hover_timeout)
+        self._hover_article_name: Optional[str] = None
+        self._hover_global_pos: tuple[int, int] = (0, 0)
+
         self._build_ui()
-        self.show_placeholder()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # -- Metadata bar (top) --
+        # -- Metadata bar --
         self.metadata_bar = MetadataBar()
         root.addWidget(self.metadata_bar)
 
-        # -- Scroll area for everything below --
+        # -- Central scroll area --
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -141,7 +224,7 @@ class ArticleView(QFrame):
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(24, 16, 24, 16)
-        scroll_layout.setSpacing(12)
+        scroll_layout.setSpacing(8)
 
         # -- Title --
         self.title_edit = QLineEdit()
@@ -149,37 +232,90 @@ class ArticleView(QFrame):
         self.title_edit.setPlaceholderText("Article Title")
         self.title_edit.setStyleSheet(
             "font-size: 24px; font-weight: 600; border: none;"
-            " padding: 4px 0; margin-bottom: 8px;"
+            " padding: 4px 0; margin-bottom: 4px;"
         )
         scroll_layout.addWidget(self.title_edit)
 
-        # -- Splitter: content editor (left) + template fields (right) --
+        # -- Splitter: content area (left) + template fields (right) --
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
 
-        # Left: Content editor
-        content_panel = QWidget()
-        content_panel_layout = QVBoxLayout(content_panel)
-        content_panel_layout.setContentsMargins(0, 0, 0, 0)
+        # Left panel: tabs for Edit/Preview
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(4)
 
+        # View/Edit toggle buttons
+        mode_bar = QHBoxLayout()
+        mode_bar.setSpacing(4)
+        self.edit_btn = QPushButton("✏ Edit")
+        self.edit_btn.setCheckable(True)
+        self.edit_btn.setChecked(True)
+        self.edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.edit_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 2px 10px; border: 1px solid palette(Midlight);"
+            "  border-radius: 4px; }"
+            "QPushButton:checked { background: palette(Highlight); color: palette(HighlightedText); }"
+        )
+        self.edit_btn.toggled.connect(self._on_edit_mode_toggled)
+        mode_bar.addWidget(self.edit_btn)
+
+        self.preview_btn = QPushButton("👁 Preview")
+        self.preview_btn.setCheckable(True)
+        self.preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preview_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 2px 10px; border: 1px solid palette(Midlight);"
+            "  border-radius: 4px; }"
+            "QPushButton:checked { background: palette(Highlight); color: palette(HighlightedText); }"
+        )
+        self.preview_btn.toggled.connect(self._on_preview_mode_toggled)
+        mode_bar.addWidget(self.preview_btn)
+
+        mode_bar.addStretch(1)
+        left_layout.addLayout(mode_bar)
+
+        # Content editor (QPlainTextEdit)
         self.content_edit = QPlainTextEdit()
         self.content_edit.setObjectName("ArticleContent")
         self.content_edit.setPlaceholderText(
             "Write your article content here...\n\n"
             "Use [[Article Name]] to create wiki links.\n"
-            "Markdown formatting is supported."
+            "Use [[Article Name|Display Text]] for custom link text.\n"
+            "Markdown: **bold**, *italic*, `code`, # headings"
         )
         self.content_edit.setTabChangesFocus(False)
         self.content_edit.setMinimumHeight(200)
-        content_panel_layout.addWidget(self.content_edit, 1)
-        splitter.addWidget(content_panel)
+        left_layout.addWidget(self.content_edit, 1)
 
-        # Right: Template fields panel
+        # Preview browser (WikiTextBrowser with rendered wiki links)
+        self.preview_browser = WikiTextBrowser()
+        self.preview_browser.setMinimumHeight(200)
+        self.preview_browser.link_navigated.connect(self._on_link_navigated)
+        self.preview_browser.link_creation_requested.connect(
+            self.link_creation_requested.emit
+        )
+        # Mouse tracking for hover tooltips in the preview
+        self.preview_browser.setMouseTracking(True)
+        self.preview_browser.viewport().installEventFilter(self)
+        left_layout.addWidget(self.preview_browser, 1)
+
+        self.content_edit.show()
+        self.preview_browser.hide()
+
+        splitter.addWidget(left_panel)
+
+        # Right panel: template fields
         self.template_fields_panel = DynamicForm()
         splitter.addWidget(self.template_fields_panel)
 
         splitter.setSizes([600, 300])
         scroll_layout.addWidget(splitter, 1)
+
+        # -- Backlinks section --
+        self.backlinks_section = BacklinksSection()
+        self.backlinks_section.article_selected.connect(self.link_navigated.emit)
+        scroll_layout.addWidget(self.backlinks_section)
 
         # -- Save indicator --
         self.save_indicator = QLabel("")
@@ -190,7 +326,7 @@ class ArticleView(QFrame):
         scroll_area.setWidget(scroll_content)
         root.addWidget(scroll_area, 1)
 
-        # -- Placeholder label (shown when no article is loaded) --
+        # -- Welcome placeholder --
         self.placeholder = QLabel(
             "Welcome to LoreKeeper\n\n"
             "Select an article from the sidebar or create a new one.\n\n"
@@ -213,11 +349,10 @@ class ArticleView(QFrame):
     # ------------------------------------------------------------------
 
     def load_article(self, article: Article) -> None:
-        """Load an article into the view (read-write)."""
+        """Load an article into the view."""
         self._article = article
         self.placeholder.hide()
 
-        # Block signals while setting content
         self.title_edit.blockSignals(True)
         self.content_edit.blockSignals(True)
 
@@ -229,24 +364,28 @@ class ArticleView(QFrame):
 
         self.metadata_bar.set_metadata(article)
 
-        # Load template fields if a custom template exists
+        # Refresh preview
+        self.preview_browser.set_wiki_content(article.content)
+
+        # Template fields
         template = crud.get_template_by_type_name(article.article_type)
         self.template_fields_panel.load_template(template, article.template_fields)
+
+        # Backlinks
+        self.backlinks_section.set_article(article)
 
         self.save_indicator.setText("")
 
     def load_article_by_id(self, article_id: str) -> None:
-        """Fetch an article from the database and load it."""
+        """Fetch and load an article by id."""
         article = crud.get_article(article_id)
         if article:
             self.load_article(article)
 
     def show_placeholder(self) -> None:
-        """Show the welcome placeholder, hide article content."""
+        """Show the welcome placeholder."""
         self._article = None
         self.placeholder.show()
-        # We hide the scroll area contents? Actually we keep them visible
-        # but empty — the placeholder overlays.
 
     def clear(self) -> None:
         """Clear the editor."""
@@ -257,12 +396,14 @@ class ArticleView(QFrame):
         self.content_edit.clear()
         self.title_edit.blockSignals(False)
         self.content_edit.blockSignals(False)
+        self.preview_browser.clear()
         self.template_fields_panel.clear()
+        self.backlinks_section.set_article(None)
         self.save_indicator.setText("")
         self.show_placeholder()
 
     def save(self) -> bool:
-        """Save the current article to the database. Returns True on success."""
+        """Save the current article. Returns True on success."""
         if self._article is None:
             return False
 
@@ -279,12 +420,17 @@ class ArticleView(QFrame):
         self._article.touch()
 
         crud.update_article(self._article)
+
+        # Refresh the preview after save
+        self.preview_browser.set_wiki_content(new_content)
+        self.backlinks_section.set_article(self._article)
+
         self.save_indicator.setText("✓ Saved")
         self.article_updated.emit(self._article.id)
         return True
 
     def create_new(self, article_type: str = "Location") -> Article:
-        """Create a new blank article of the given type and open it for editing."""
+        """Create a new article and open it for editing."""
         article = Article(title="", content="", article_type=article_type)
         crud.create_article(article)
         self.load_article(article)
@@ -298,7 +444,6 @@ class ArticleView(QFrame):
 
     @property
     def is_dirty(self) -> bool:
-        """Check if the article has unsaved changes."""
         if self._article is None:
             return False
         return (
@@ -307,17 +452,73 @@ class ArticleView(QFrame):
         )
 
     # ------------------------------------------------------------------
+    # Event filter for hover tooltip tracking on the preview browser
+    # ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.preview_browser.viewport():
+            if event.type() == event.Type.MouseMove:
+                self._on_mouse_move(event)
+            elif event.type() == event.Type.Leave:
+                self._hover_tracker.stop()
+        return super().eventFilter(obj, event)
+
+    def _on_mouse_move(self, event) -> None:
+        """Check if mouse is over a wiki link in the preview browser."""
+        pos = event.pos()
+        cursor = self.preview_browser.cursorForPosition(pos)
+        # Check if the cursor is over an anchor
+        char_format = cursor.charFormat()
+        anchor_href = char_format.anchorHref() if char_format else ""
+
+        if anchor_href and ("wikilink://" in anchor_href or "wikicreate://" in anchor_href):
+            # Extract article name
+            article_name = anchor_href.split("://", 1)[-1] if "://" in anchor_href else ""
+            if article_name:
+                global_pos = self.preview_browser.viewport().mapToGlobal(pos)
+                self._hover_tracker.on_mouse_move(article_name, (global_pos.x(), global_pos.y()))
+                return
+
+        # Not over a link
+        self._hover_tracker.on_mouse_move(None, (0, 0))
+
+    def _on_hover_timeout(self) -> None:
+        if self._hover_article_name:
+            self._tooltip.show_for_article(
+                self._hover_article_name, self._hover_global_pos
+            )
+
+    # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
 
     def _on_content_edited(self) -> None:
-        """Mark the article as having unsaved changes."""
         if self._article:
             self.save_indicator.setText("✎ Unsaved changes")
             self.content_changed.emit()
 
+    def _on_edit_mode_toggled(self, checked: bool) -> None:
+        if checked:
+            self.content_edit.show()
+            self.preview_browser.hide()
+            self.edit_btn.setChecked(True)
+            self.preview_btn.setChecked(False)
+
+    def _on_preview_mode_toggled(self, checked: bool) -> None:
+        if checked:
+            # Sync preview from current editor content
+            self.preview_browser.set_wiki_content(self.content_edit.toPlainText())
+            self.content_edit.hide()
+            self.preview_browser.show()
+            self.edit_btn.setChecked(False)
+            self.preview_btn.setChecked(True)
+
+    def _on_link_navigated(self, article_id: str) -> None:
+        """Handle clicking a wiki link in preview mode."""
+        self.link_navigated.emit(article_id)
+
     def set_edit_mode(self, editing: bool) -> None:
-        """Toggle edit mode (editable vs read-only view)."""
+        """Toggle edit mode."""
         self._edit_mode = editing
         self.title_edit.setReadOnly(not editing)
         self.content_edit.setReadOnly(not editing)

@@ -250,6 +250,10 @@ class MainWindow(QMainWindow):
         self.sidebar.travel_map_requested.connect(self._on_travel_map)
         self.sidebar.create_article_requested.connect(self._on_new_article)
 
+        # Wiki link signals from article view
+        self.article_view.link_navigated.connect(self._on_article_link_navigated)
+        self.article_view.link_creation_requested.connect(self._on_article_link_creation)
+
     def _build_status_bar(self) -> None:
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -453,6 +457,53 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Found {len(results)} result(s) for '{query}'")
         # Load the first result
         self.article_view.load_article(results[0])
+
+    def _on_article_link_navigated(self, article_id: str) -> None:
+        """Handle a wiki link click in the article preview — navigate to that article."""
+        article = crud.get_article(article_id)
+        if article:
+            self.article_view.load_article(article)
+            self.status_label.setText(f"Navigated to: {article.title}")
+        else:
+            self.status_label.setText(f"Article not found: {article_id[:8]}...")
+
+    def _on_article_link_creation(self, article_name: str) -> None:
+        """Handle clicking a link to a non-existent article — offer to create it."""
+        result = QMessageBox.question(
+            self,
+            "Create Article",
+            f'The article "{article_name}" does not exist yet.\n\n'
+            "Would you like to create it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            # Show type selector
+            from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QVBoxLayout, QLabel
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f'New Article: "{article_name}"')
+            dialog.setMinimumWidth(360)
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel(f'Select type for "{article_name}":'))
+            combo = QComboBox()
+            types = crud.list_all_article_types()
+            combo.addItems(types)
+            combo.setCurrentText("Location")
+            layout.addWidget(combo)
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            )
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                article_type = combo.currentText()
+                article = Article(title=article_name, content="", article_type=article_type)
+                crud.create_article(article)
+                self.article_view.load_article(article)
+                self.status_label.setText(f'Created: "{article_name}" ({article_type})')
+                self.sidebar.refresh_recent()
 
     # ------------------------------------------------------------------
     # Internal
