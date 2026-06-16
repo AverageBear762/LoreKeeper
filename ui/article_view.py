@@ -34,6 +34,7 @@ from database import crud
 from database.models import Article, ArticleTemplate
 from ui.form_builder import DynamicForm
 from ui.hover_preview import HoverPreviewWidget, HoverTracker
+from ui.link_autocomplete import LinkAutocompletePopup
 from ui.wiki_links import WikiTextBrowser, find_backlinks
 
 
@@ -288,6 +289,12 @@ class ArticleView(QFrame):
         self.content_edit.setMinimumHeight(200)
         left_layout.addWidget(self.content_edit, 1)
 
+        # Link autocomplete popup
+        self._link_autocomplete = LinkAutocompletePopup(self)
+        self.content_edit.textChanged.connect(self._on_content_autocomplete)
+        self._autocomplete_active = False
+        self._autocomplete_query = ""
+
         # Preview browser (WikiTextBrowser with rendered wiki links)
         self.preview_browser = WikiTextBrowser()
         self.preview_browser.setMinimumHeight(200)
@@ -489,8 +496,118 @@ class ArticleView(QFrame):
             )
 
     # ------------------------------------------------------------------
-    # Slots
+    # Link autocomplete
     # ------------------------------------------------------------------
+
+    def _on_content_autocomplete(self) -> None:
+        """Detect [[ typing and show autocomplete popup."""
+        cursor = self.content_edit.textCursor()
+        pos = cursor.position()
+        text = self.content_edit.toPlainText()
+
+        # Look backwards for [[ before cursor
+        if pos < 2:
+            self._dismiss_autocomplete()
+            return
+
+        # Find the last [[ before cursor
+        before = text[:pos]
+        last_open = before.rfind("[[")
+
+        if last_open == -1 or pos - last_open > 30:
+            self._dismiss_autocomplete()
+            return
+
+        # Check if there's a ]] that closes it
+        after = text[last_open + 2:pos]
+        if "]]" in after:
+            self._dismiss_autocomplete()
+            return
+
+        # Extract the partial query
+        query = before[last_open + 2:]
+        # Check if query has a pipe (display text)
+        pipe_idx = query.find("|")
+        if pipe_idx >= 0:
+            query = query[:pipe_idx]
+
+        # Clean and show
+        query = query.strip()
+        if query and query != query:
+            self._dismiss_autocomplete()
+            return
+
+        # Get cursor position for popup placement
+        cursor_rect = self.content_edit.cursorRect(cursor)
+        global_pos = self.content_edit.viewport().mapToGlobal(
+            cursor_rect.bottomLeft()
+        )
+
+        self._autocomplete_active = True
+        self._autocomplete_query = query
+        self._link_autocomplete.show_for_query(query, cursor_rect, global_pos)
+
+        # Override key press events while autocomplete is active
+        if self._autocomplete_active:
+            self.content_edit.keyPressEvent = self._content_key_press_with_autocomplete
+
+    def _dismiss_autocomplete(self) -> None:
+        """Hide the autocomplete popup."""
+        if self._autocomplete_active:
+            self._link_autocomplete.hide()
+            self._autocomplete_active = False
+            self._autocomplete_query = ""
+            self.content_edit.keyPressEvent = self._content_key_press_default
+
+    def _content_key_press_with_autocomplete(self, event) -> None:
+        """Handle key events while autocomplete is visible."""
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtCore import Qt
+
+        key = event.key()
+        if key == Qt.Key.Key_Down:
+            self._link_autocomplete.select_next()
+            event.accept()
+        elif key == Qt.Key.Key_Up:
+            self._link_autocomplete.select_prev()
+            event.accept()
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab):
+            selected = self._link_autocomplete.get_selected_title()
+            if selected:
+                self._insert_wiki_link(selected)
+                event.accept()
+                return
+            self._dismiss_autocomplete()
+            self._content_key_press_default(event)
+        elif key == Qt.Key.Key_Escape:
+            self._dismiss_autocomplete()
+            event.accept()
+        else:
+            self._content_key_press_default(event)
+
+    def _content_key_press_default(self, event) -> None:
+        """Default key press handler (no autocomplete)."""
+        QPlainTextEdit.keyPressEvent(self.content_edit, event)
+
+    def _insert_wiki_link(self, article_title: str) -> None:
+        """Replace the [[partial with [[Full Title]]."""
+        cursor = self.content_edit.textCursor()
+        text = self.content_edit.toPlainText()
+        pos = cursor.position()
+
+        # Find the [[ that started this
+        before = text[:pos]
+        last_open = before.rfind("[[")
+
+        if last_open == -1:
+            self._dismiss_autocomplete()
+            return
+
+        # Select from [[ to current position
+        cursor.setPosition(last_open)
+        cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+        cursor.insertText(f"[[{article_title}]]")
+        self._dismiss_autocomplete()
 
     def _on_content_edited(self) -> None:
         if self._article:

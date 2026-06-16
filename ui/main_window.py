@@ -37,6 +37,8 @@ from database import crud
 from database.manager import DatabaseManager
 from database.models import Article
 from ui.article_view import ArticleView
+from ui.backup_manager import export_json_dialog, import_json_dialog, backup_database_dialog
+from ui.search_dialog import SearchDialog
 from ui.sidebar import Sidebar
 from ui.template_editor import TemplateManagementDialog
 from ui.theme import ThemeManager
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.theme = theme_mgr
         self._autosave_timer = QTimer(self)
         self._db: Optional[DatabaseManager] = None
+        self._search_dialog: Optional[SearchDialog] = None
 
         self.setWindowTitle(self.APP_TITLE)
         self.setMinimumSize(1024, 680)
@@ -97,6 +100,20 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        self.act_export_json = QAction("&Export JSON Snapshot...", self)
+        self.act_export_json.triggered.connect(self._on_export_json)
+        file_menu.addAction(self.act_export_json)
+
+        self.act_import_json = QAction("&Import JSON Snapshot...", self)
+        self.act_import_json.triggered.connect(self._on_import_json)
+        file_menu.addAction(self.act_import_json)
+
+        file_menu.addSeparator()
+
+        self.act_backup_db = QAction("&Backup Database...", self)
+        self.act_backup_db.triggered.connect(self._on_backup_db)
+        file_menu.addAction(self.act_backup_db)
+
         self.act_open_db = QAction("&Open Database...", self)
         self.act_open_db.setShortcut(QKeySequence("Ctrl+O"))
         self.act_open_db.triggered.connect(self._on_open_database)
@@ -118,6 +135,13 @@ class MainWindow(QMainWindow):
         self.act_redo = QAction("&Redo", self)
         self.act_redo.setShortcut(QKeySequence("Ctrl+Y"))
         edit_menu.addAction(self.act_redo)
+
+        edit_menu.addSeparator()
+
+        self.act_search = QAction("&Search Articles...", self)
+        self.act_search.setShortcut(QKeySequence("Ctrl+F"))
+        self.act_search.triggered.connect(self._on_global_search_dialog)
+        edit_menu.addAction(self.act_search)
 
         edit_menu.addSeparator()
 
@@ -483,6 +507,29 @@ class MainWindow(QMainWindow):
             "<p>Built with Python, PySide6, and SQLite FTS5.</p>"
             "<p>© 2026 LoreKeeper Team</p>",
         )
+
+    def _on_global_search_dialog(self) -> None:
+        """Open the global search dialog."""
+        if self._search_dialog is None:
+            self._search_dialog = SearchDialog(self)
+            self._search_dialog.article_selected.connect(
+                self.article_view.load_article_by_id
+            )
+        self._search_dialog.focus_search()
+        self._search_dialog.show()
+        self._search_dialog.raise_()
+
+    def _on_export_json(self) -> None:
+        """Export JSON snapshot."""
+        export_json_dialog(self)
+
+    def _on_import_json(self) -> None:
+        """Import JSON snapshot."""
+        import_json_dialog(self)
+
+    def _on_backup_db(self) -> None:
+        """Backup database."""
+        backup_database_dialog(self)
 
     def _on_global_search(self, query: str) -> None:
         """Perform a full-text search and show results."""

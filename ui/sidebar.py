@@ -168,12 +168,22 @@ class Sidebar(QFrame):
         return label
 
     def _populate_type_tree(self) -> None:
-        """Fill the category tree with article types."""
+        """Fill the category tree with article types and their counts."""
         self.type_tree.clear()
         all_types = crud.list_all_article_types()
+
+        # Get counts for each type
+        type_counts: dict[str, int] = {}
+        articles = crud.list_articles(limit=9999)
+        for a in articles:
+            type_counts[a.article_type] = type_counts.get(a.article_type, 0) + 1
+
         for t in all_types:
-            item = QTreeWidgetItem([t])
+            count = type_counts.get(t, 0)
+            label = f"{t}  ({count})" if count > 0 else t
+            item = QTreeWidgetItem([label])
             item.setData(0, Qt.ItemDataRole.UserRole, t)
+            item.setData(0, Qt.ItemDataRole.DecorationRole, self._type_icon(t))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEnabled)
             self.type_tree.addTopLevelItem(item)
 
@@ -215,20 +225,38 @@ class Sidebar(QFrame):
     # ------------------------------------------------------------------
 
     def refresh_favorites(self) -> None:
-        """Reload the favorites list from the database."""
+        """Reload the favorites list with type icons and timestamps."""
         self.favorites_list.clear()
         favs = crud.list_articles(favorite_only=True, limit=50)
         for a in favs:
-            item = QListWidgetItem(f"⭐ {a.title}")
+            icon = self._type_icon(a.article_type)
+            item = QListWidgetItem(f"{icon} {a.title}")
             item.setData(Qt.ItemDataRole.UserRole, a.id)
+            item.setToolTip(f"{a.article_type} — Updated: {a.updated_at[:10]}")
             self.favorites_list.addItem(item)
 
     def refresh_recent(self) -> None:
-        """Reload the recently viewed list from the database."""
+        """Reload the recently viewed list with relative timestamps."""
         self.recent_list.clear()
         recent = crud.list_articles(sort_by="updated_at", sort_desc=True, limit=20)
         for a in recent:
-            item = QListWidgetItem(a.title)
+            from datetime import datetime
+            time_str = ""
+            try:
+                updated = datetime.fromisoformat(a.updated_at)
+                ago = datetime.now() - updated
+                if ago.days > 0:
+                    time_str = f" {ago.days}d"
+                elif ago.seconds >= 3600:
+                    time_str = f" {ago.seconds // 3600}h"
+                elif ago.seconds >= 60:
+                    time_str = f" {ago.seconds // 60}m"
+                else:
+                    time_str = " now"
+            except (ValueError, TypeError):
+                pass
+            icon = self._type_icon(a.article_type)
+            item = QListWidgetItem(f"{icon} {a.title}{time_str}")
             item.setData(Qt.ItemDataRole.UserRole, a.id)
             self.recent_list.addItem(item)
 
@@ -243,3 +271,13 @@ class Sidebar(QFrame):
     def clear_search(self) -> None:
         """Clear the search bar."""
         self.search_bar.clear()
+
+    @staticmethod
+    def _type_icon(article_type: str) -> str:
+        icons = {
+            "Character": "🧑", "Location": "📍", "Faction": "⚜",
+            "Item": "⚔", "Creature": "🐉", "Event": "📅",
+            "Religion": "✝", "Species": "🧬", "Settlement": "🏘",
+            "Nation": "🏰",
+        }
+        return icons.get(article_type, "📄")
