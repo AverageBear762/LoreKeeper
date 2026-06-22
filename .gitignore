@@ -6,8 +6,8 @@ __pycache__/
 # Distribution / packaging
 dist/
 build/
-*.spec
 *.egg-info/
+# NOTE: lorekeeper.spec IS tracked — remove only auto-generated *.spec files
 
 # Virtual environments
 venv/

@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, QSize, Slot
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main Toolbar")
         toolbar.setObjectName("MainToolbar")
         toolbar.setMovable(False)
-        toolbar.setIconSize(self.font().pointSize() * 2)
+        toolbar.setIconSize(QSize(self.font().pointSize() * 2, self.font().pointSize() * 2))
         self.addToolBar(toolbar)
 
         # Tool buttons
