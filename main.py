@@ -46,25 +46,32 @@ def main() -> None:
     theme = ThemeManager(app)
     theme.switch_to(ThemeManager.LIGHT)
 
-    # Build and show the main window
+    db_path = _resolve_db_path(sys.argv[1] if len(sys.argv) > 1 else None)
+    try:
+        DatabaseManager().open(db_path)
+    except Exception as e:
+        QMessageBox.warning(
+            None,
+            "Database",
+            f"Could not open database at:\n{db_path}\n\n{e}\n\n"
+            "Falling back to in-memory database. "
+            "Use File → Open Database to open an existing file.",
+        )
+        # Fall back to in-memory so the app doesn't crash on startup
+        DatabaseManager().open(":memory:")
+
+    # Build and show the main window — it will query the DB for sidebar counts,
+    # travel map data, etc. so the DB _must_ be open before this point.
     window = MainWindow(theme)
     window.show()
 
-    # Open the database (default or from CLI argument)
-    db_path = _resolve_db_path(sys.argv[1] if len(sys.argv) > 1 else None)
-    try:
-        window.open_database(db_path)
-    except Exception as e:
-        QMessageBox.warning(
-            window,
-            "Database",
-            f"Could not open database at:\n{db_path}\n\n{e}\n\n"
-            "A new database will be created when you save.",
-        )
+    # Attach the manager to the window for status bar and other internals
+    window._db = DatabaseManager()
+    window._update_db_status()
+    window.refresh_ui()
 
     # Seed default templates into the database
     try:
-        from database.manager import DatabaseManager as dbm
         ensure_default_templates()
     except Exception:
         pass  # Already seeded or DB not ready
