@@ -75,6 +75,7 @@ class Article:
     title: str = ""
     content: str = ""
     article_type: str = "Location"
+    parent_id: Optional[str] = None
     template_fields: dict[str, Any] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     is_favorite: bool = False
@@ -88,6 +89,7 @@ class Article:
             "title": self.title,
             "content": self.content,
             "article_type": self.article_type,
+            "parent_id": self.parent_id,
             "template_fields": _json_serialise(self.template_fields),
             "tags": _json_serialise(self.tags),
             "is_favorite": 1 if self.is_favorite else 0,
@@ -103,6 +105,7 @@ class Article:
             title=row["title"],
             content=row.get("content", ""),
             article_type=row.get("article_type", "Location"),
+            parent_id=row.get("parent_id"),
             template_fields=_json_deserialise(row.get("template_fields")) or {},
             tags=_json_deserialise(row.get("tags")) or [],
             is_favorite=bool(row.get("is_favorite", 0)),

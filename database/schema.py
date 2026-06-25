@@ -15,7 +15,7 @@ from typing import Any
 # Schema version tracking
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1  # bump when adding new migrations
+SCHEMA_VERSION = 2  # bump when adding new migrations
 
 CREATE_SCHEMA_VERSION = """
 CREATE TABLE IF NOT EXISTS _schema_version (
@@ -34,11 +34,13 @@ CREATE TABLE IF NOT EXISTS articles (
     title       TEXT NOT NULL,
     content     TEXT NOT NULL DEFAULT '',
     article_type TEXT NOT NULL DEFAULT 'Location',
+    parent_id   TEXT,
     template_fields TEXT NOT NULL DEFAULT '{}',
     tags        TEXT NOT NULL DEFAULT '[]',
     is_favorite INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES articles(id) ON DELETE SET NULL
 );
 """
 
@@ -102,6 +104,7 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_articles_favorite ON articles(is_favorite);",
     "CREATE INDEX IF NOT EXISTS idx_articles_updated ON articles(updated_at);",
     "CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_articles_parent ON articles(parent_id);",
     "CREATE INDEX IF NOT EXISTS idx_map_nodes_article ON map_nodes(article_id);",
     "CREATE INDEX IF NOT EXISTS idx_map_connections_a ON map_connections(node_a_id);",
     "CREATE INDEX IF NOT EXISTS idx_map_connections_b ON map_connections(node_b_id);",
@@ -196,6 +199,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         set_schema_version(conn, SCHEMA_VERSION)
         return
 
+    # v2: Add parent_id column for parent-child article relationships
+    if current < 2:
+        _migrate_v2(conn)
+        set_schema_version(conn, 2)
+
     # Future migrations go here:
     # if current < 2:
     #     _migrate_v2(conn)
@@ -209,3 +217,19 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     create_all_tables(conn)
     set_schema_version(conn, SCHEMA_VERSION)
+
+
+# ---------------------------------------------------------------------------
+# Migration: v2 — parent_id column for article hierarchy
+# ---------------------------------------------------------------------------
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """Add parent_id column and parent_id index to articles table."""
+    conn.execute(
+        "ALTER TABLE articles ADD COLUMN parent_id TEXT "
+        "REFERENCES articles(id) ON DELETE SET NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_articles_parent ON articles(parent_id)"
+    )
+    conn.commit()

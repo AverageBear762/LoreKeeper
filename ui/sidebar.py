@@ -168,24 +168,54 @@ class Sidebar(QFrame):
         return label
 
     def _populate_type_tree(self) -> None:
-        """Fill the category tree with article types and their counts."""
+        """Fill the category tree with article types and hierarchy."""
         self.type_tree.clear()
         all_types = crud.list_all_article_types()
 
-        # Get counts for each type
-        type_counts: dict[str, int] = {}
-        articles = crud.list_articles(limit=9999)
-        for a in articles:
-            type_counts[a.article_type] = type_counts.get(a.article_type, 0) + 1
+        # Get hierarchical article data: (root_article, [child_articles])
+        hierarchy = crud.get_article_hierarchy()
+        # Also track orphan articles (no parent, but still listed per type)
+        orphan_ids = {a.id for a, _ in hierarchy}
+
+        # Group roots by type
+        roots_by_type: dict[str, list[tuple[Article, list[Article]]]] = {}
+        for root, children in hierarchy:
+            t = root.article_type
+            if t not in roots_by_type:
+                roots_by_type[t] = []
+            roots_by_type[t].append((root, children))
 
         for t in all_types:
-            count = type_counts.get(t, 0)
-            label = f"{t}  ({count})" if count > 0 else t
-            item = QTreeWidgetItem([label])
-            item.setData(0, Qt.ItemDataRole.UserRole, t)
-            item.setData(0, Qt.ItemDataRole.DecorationRole, self._type_icon(t))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEnabled)
-            self.type_tree.addTopLevelItem(item)
+            type_root = QTreeWidgetItem([t])
+            type_root.setData(0, Qt.ItemDataRole.UserRole, t)
+            type_root.setData(0, Qt.ItemDataRole.DecorationRole, self._type_icon(t))
+            type_root.setFlags(type_root.flags() | Qt.ItemFlag.ItemIsEnabled)
+            type_root.setExpanded(True)
+            self.type_tree.addTopLevelItem(type_root)
+
+            # Add root articles (parent_id IS NULL) as children of type
+            for root_article, child_articles in roots_by_type.get(t, []):
+                root_item = QTreeWidgetItem([
+                    f"{self._type_icon(root_article.article_type)} {root_article.title}"
+                ])
+                root_item.setData(0, Qt.ItemDataRole.UserRole, root_article.id)
+                root_item.setToolTip(0, f"{root_article.article_type}")
+                type_root.addChild(root_item)
+                root_item.setExpanded(True)
+
+                # Add child articles beneath each root
+                for child in child_articles:
+                    child_item = QTreeWidgetItem([
+                        f"  {self._type_icon(child.article_type)} {child.title}"
+                    ])
+                    child_item.setData(0, Qt.ItemDataRole.UserRole, child.id)
+                    child_item.setToolTip(0, f"Child of: {root_article.title}")
+                    root_item.addChild(child_item)
+
+            # Show count for the type header
+            count = type_root.childCount()
+            if count > 0:
+                type_root.setText(0, f"{t}  ({count})")
 
     # ------------------------------------------------------------------
     # Slots
@@ -202,11 +232,14 @@ class Sidebar(QFrame):
             self.search_requested.emit(query)
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
-        """Filter articles by the selected type."""
-        article_type = item.data(0, Qt.ItemDataRole.UserRole)
-        if article_type:
-            results = crud.list_articles(article_type=article_type, limit=200)
-            # Emit the first matching article or just the type filter
+        """Navigate to an article or filter by type."""
+        article_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if article_id and len(article_id) == 36:  # UUID length = 36 chars
+            # This is an article item — navigate to it
+            self.article_selected.emit(article_id)
+        elif article_id:
+            # This is a type header — emit search/filter for that type
+            results = crud.list_articles(article_type=article_id, limit=200)
             if results:
                 self.article_selected.emit(results[0].id)
 

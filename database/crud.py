@@ -32,10 +32,10 @@ def create_article(article: Article) -> Article:
     db.execute(
         """
         INSERT INTO articles (id, title, content, article_type,
-                              template_fields, tags, is_favorite,
+                              parent_id, template_fields, tags, is_favorite,
                               created_at, updated_at)
         VALUES (:id, :title, :content, :article_type,
-                :template_fields, :tags, :is_favorite,
+                :parent_id, :template_fields, :tags, :is_favorite,
                 :created_at, :updated_at)
         """,
         article.to_row(),
@@ -69,6 +69,7 @@ def update_article(article: Article) -> Article:
             title = :title,
             content = :content,
             article_type = :article_type,
+            parent_id = :parent_id,
             template_fields = :template_fields,
             tags = :tags,
             is_favorite = :is_favorite,
@@ -182,6 +183,41 @@ def search_articles(query: str, limit: int = 50) -> list[Article]:
         )
 
     return [Article.from_row(dict(r)) for r in rows]
+
+
+def list_child_articles(parent_id: str) -> list[Article]:
+    """Return all articles whose parent_id matches the given id."""
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM articles WHERE parent_id = ? ORDER BY title",
+        (parent_id,),
+    )
+    return [Article.from_row(dict(r)) for r in rows]
+
+
+def get_article_hierarchy() -> list[tuple[Article, list[Article]]]:
+    """Return (root_article, [child_articles]) pairs, sorted by type then title.
+
+    Root articles are those with parent_id IS NULL.
+    Children are fetched per root via list_child_articles().
+    """
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM articles WHERE parent_id IS NULL "
+        "ORDER BY article_type, title"
+    )
+    result: list[tuple[Article, list[Article]]] = []
+    for r in rows:
+        root = Article.from_row(dict(r))
+        children = list_child_articles(root.id)
+        result.append((root, children))
+    return result
+
+
+def set_article_parent(article_id: str, parent_id: str | None) -> None:
+    """Set or clear the parent of an article."""
+    DatabaseManager().execute(
+        "UPDATE articles SET parent_id = ? WHERE id = ?",
+        (parent_id, article_id),
+    )
 
 
 # ======================================================================
