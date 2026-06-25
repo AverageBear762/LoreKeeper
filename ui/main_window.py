@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -245,7 +246,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.toolbar_search)
 
     def _build_central(self) -> None:
-        """Build the main content area with sidebar + stacked views."""
+        """Build the main content area with sidebar + tabbed views."""
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
@@ -257,22 +258,33 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(1)
         splitter.setChildrenCollapsible(False)
 
-        # Sidebar
+        # Sidebar (always visible)
         self.sidebar = Sidebar()
         splitter.addWidget(self.sidebar)
 
-        # Stacked widget: index 0 = article view, index 1 = travel map
-        self.view_stack = QStackedWidget()
+        # Right side: tab widget with Articles and Travel Map tabs
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
 
-        # Article view (central)
+        # Tab bar for switching between views
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabBarAutoHide(False)
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
+        # Tab 0: Articles
         self.article_view = ArticleView()
-        self.view_stack.addWidget(self.article_view)
+        self.tab_widget.addTab(self.article_view, "📄 Articles")
 
-        # Travel map
+        # Tab 1: Travel Map
         self.travel_map = TravelMapWidget()
-        self.view_stack.addWidget(self.travel_map)
+        self.tab_widget.addTab(self.travel_map, "🗺 Travel Map")
 
-        splitter.addWidget(self.view_stack)
+        right_layout.addWidget(self.tab_widget)
+
+        splitter.addWidget(right_panel)
 
         # Set proportions: 260px sidebar, rest for content
         splitter.setSizes([260, 1020])
@@ -437,21 +449,27 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Switched to {new_theme} theme")
 
     def _on_travel_map(self) -> None:
-        """Alias for _switch_to_travel_map (called from sidebar)."""
+        """Switch to the Travel Map tab."""
         self._switch_to_travel_map()
 
     def _switch_to_travel_map(self) -> None:
-        """Switch to the travel map view."""
-        self.view_stack.setCurrentIndex(1)
+        """Switch to the travel map tab."""
+        self.tab_widget.setCurrentIndex(1)
         self.travel_map.reload()
         self.status_label.setText("🗺 Travel Map")
-        self.sidebar.hide()
 
     def _switch_to_article_view(self) -> None:
-        """Switch back to the article view."""
-        self.view_stack.setCurrentIndex(0)
-        self.sidebar.show()
+        """Switch to the articles tab."""
+        self.tab_widget.setCurrentIndex(0)
         self.status_label.setText("Wiki View")
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab switch — reload travel map data when switching to it."""
+        if index == 1:
+            self.travel_map.reload()
+            self.status_label.setText("🗺 Travel Map")
+        else:
+            self.status_label.setText("Wiki View")
 
     def _on_travel_map_navigate(self, article_id: str) -> None:
         """Navigate from travel map to an article."""
