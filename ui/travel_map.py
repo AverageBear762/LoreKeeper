@@ -711,6 +711,15 @@ class TravelMapWidget(QWidget):
 
         toolbar.addSeparator()
 
+        # Connect nodes toggle
+        self.act_connect = QAction("🔗 Connect", self)
+        self.act_connect.setCheckable(True)
+        self.act_connect.setToolTip("Toggle connection-drawing mode")
+        self.act_connect.triggered.connect(self._on_toggle_connect_mode)
+        toolbar.addAction(self.act_connect)
+
+        toolbar.addSeparator()
+
         self.act_zoom_in = QAction("🔍+ Zoom In", self)
         self.act_zoom_in.setShortcut(QKeySequence("Ctrl++"))
         self.act_zoom_in.triggered.connect(self._zoom_in)
@@ -732,6 +741,11 @@ class TravelMapWidget(QWidget):
         self.node_search.setMaximumWidth(200)
         self.node_search.textChanged.connect(self._on_search_changed)
         toolbar.addWidget(self.node_search)
+
+        # Connection mode status label
+        self._connect_status = QLabel("")
+        self._connect_status.setStyleSheet("color: #dc3545; font-weight: bold; padding: 0 8px;")
+        toolbar.addWidget(self._connect_status)
 
         layout.addWidget(toolbar)
 
@@ -827,6 +841,20 @@ class TravelMapWidget(QWidget):
     # ----------------------------------------------------------------
     # Search / filter
     # ----------------------------------------------------------------
+
+    def _on_toggle_connect_mode(self, checked: bool) -> None:
+        """Toggle connection-drawing mode on/off."""
+        if checked:
+            self.act_connect.setText("🔗 Connecting...")
+            self._connect_status.setText("Click a node to start")
+            self._view.setCursor(Qt.CursorShape.CrossCursor)
+            self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
+        else:
+            self.act_connect.setText("🔗 Connect")
+            self._connect_status.setText("")
+            self._view.setCursor(Qt.CursorShape.ArrowCursor)
+            self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self._scene.cancel_drawing_connection()
 
     def _on_search_changed(self, text: str) -> None:
         """Filter visible nodes based on search text."""
@@ -1098,6 +1126,13 @@ class TravelMapWidget(QWidget):
         if obj is self._view.viewport():
             if event.type() == event.Type.MouseMove:
                 self._on_view_mouse_move(event)
+                if self._scene.is_drawing_connection:
+                    scene_pos = self._view.mapToScene(event.position().toPoint())
+                    self._scene.update_drawing_connection(scene_pos)
+            elif event.type() == event.Type.MouseButtonPress:
+                if self.act_connect.isChecked() or self._scene.is_drawing_connection:
+                    self._on_connect_click(event)
+                    return True
             elif event.type() == event.Type.Leave:
                 self._hide_tooltip()
         return super().eventFilter(obj, event)
@@ -1119,6 +1154,39 @@ class TravelMapWidget(QWidget):
         elif not node_item:
             self._hide_tooltip()
             self._hovered_node = None
+
+    def _on_connect_click(self, event) -> None:
+        """Handle mouse clicks in connection-drawing mode."""
+        scene_pos = self._view.mapToScene(event.position().toPoint())
+        item = self._scene.itemAt(scene_pos, self._view.transform())
+
+        # Find the MapNodeItem that was clicked
+        node_item = None
+        while item and not isinstance(item, MapNodeItem):
+            item = item.parentItem()
+        if isinstance(item, MapNodeItem):
+            node_item = item
+
+        if node_item:
+            if not self._scene.is_drawing_connection:
+                # First click — start drawing from this node
+                self._scene.start_drawing_connection(node_item)
+                self._connect_status.setText("Now click another node to connect")
+                self.act_connect.setChecked(True)
+            else:
+                # Second click — finish connection
+                if self._scene.finish_drawing_connection(node_item):
+                    self._connect_status.setText("Connection created!")
+                    self.act_connect.setChecked(False)
+                    self._on_toggle_connect_mode(False)
+                else:
+                    self._connect_status.setText("Already connected or invalid")
+        else:
+            # Clicked empty space — cancel
+            self._scene.cancel_drawing_connection()
+            self._connect_status.setText("")
+            self.act_connect.setChecked(False)
+            self._on_toggle_connect_mode(False)
 
     def _on_hover_timeout(self) -> None:
         """Show the hover tooltip for the currently hovered node."""
