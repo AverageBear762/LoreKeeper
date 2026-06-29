@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LoreKeeper — Application Entry Point.
+World Garden — Application Entry Point.
 
 Launches the desktop application shell with:
 - Database initialisation
@@ -33,8 +33,8 @@ from ui.theme import ThemeManager
 
 def main() -> None:
     app = QApplication(sys.argv)
-    app.setApplicationName("LoreKeeper")
-    app.setOrganizationName("LoreKeeper")
+    app.setApplicationName("World Garden")
+    app.setOrganizationName("World Garden")
     app.setApplicationVersion("0.1.0")
 
     # Default font

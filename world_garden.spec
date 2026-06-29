@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-LoreKeeper — PyInstaller Spec File
+World Garden — PyInstaller Spec File
 
 Builds a standalone executable from main.py, bundling:
   - PySide6 (Qt for Python) with its dynamic Qt plugins
@@ -10,11 +10,11 @@ Builds a standalone executable from main.py, bundling:
   - Appdirs (optional, for default DB path)
 
 Usage:
-    pyinstaller lorekeeper.spec               # Clean build
-    pyinstaller lorekeeper.spec --noconfirm    # Overwrite existing dist/
+    pyinstaller world_garden.spec               # Clean build
+    pyinstaller world_garden.spec --noconfirm    # Overwrite existing dist/
 
-Output: dist/LoreKeeper/   (one-directory bundle)
-      or dist/LoreKeeper    (single executable, see console=False)
+Output: dist/WorldGarden/   (one-directory bundle)
+      or dist/World Garden    (single executable, see console=False)
 
 Platform notes:
   - Linux:   Build on the oldest glibc you need to support.
@@ -176,7 +176,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="LoreKeeper",
+    name="WorldGarden",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -203,7 +203,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="LoreKeeper",
+    name="WorldGarden",
 )
 
 # ---------------------------------------------------------------------------

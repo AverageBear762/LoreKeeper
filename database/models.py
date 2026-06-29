@@ -1,5 +1,5 @@
 """
-LoreKeeper — Data models for articles, templates, and map entities.
+World Garden — Data models for articles, templates, and map entities.
 
 All models are plain dataclasses so they stay decoupled from persistence logic.
 """

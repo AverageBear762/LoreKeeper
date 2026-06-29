@@ -1,5 +1,5 @@
 """
-LoreKeeper — Link Autocomplete for Wiki Content Editor.
+World Garden — Link Autocomplete for Wiki Content Editor.
 
 Detects when the user types `[[` in the article content editor
 and shows a dropdown list of matching article titles for

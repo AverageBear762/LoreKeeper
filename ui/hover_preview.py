@@ -1,5 +1,5 @@
 """
-LoreKeeper — Floating Hover Tooltips.
+World Garden — Floating Hover Tooltips.
 
 When hovering over a wiki link (in the article view or on the map),
 displays a custom frameless floating widget near the cursor with

@@ -1,5 +1,5 @@
 """
-LoreKeeper — Main Window.
+World Garden — Main Window.
 
 Top-level application window with:
 - Menu bar (File, Edit, View, Help)
@@ -47,9 +47,9 @@ from ui.travel_map import TravelMapWidget
 
 
 class MainWindow(QMainWindow):
-    """LoreKeeper main application window."""
+    """World Garden main application window."""
 
-    APP_TITLE = "LoreKeeper — Worldbuilding Wiki"
+    APP_TITLE = "World Garden — Worldbuilding Wiki"
 
     def __init__(self, theme_mgr: ThemeManager) -> None:
         super().__init__()
@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
         templates_menu.addAction(self.act_seed_templates)
 
         # -- Help --
-        self.act_about = QAction("&About LoreKeeper", self)
+        self.act_about = QAction("&About World Garden", self)
         self.act_about.triggered.connect(self._on_about)
         help_menu.addAction(self.act_about)
 
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def open_database(self, db_path: str) -> None:
-        """Open a LoreKeeper database file and refresh the UI."""
+        """Open a World Garden database file and refresh the UI."""
         db = DatabaseManager()
         db.open(db_path)
         self._db = db
@@ -410,7 +410,7 @@ class MainWindow(QMainWindow):
         """Open a different database file."""
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open LoreKeeper Database",
+            "Open World Garden Database",
             str(Path.home()),
             "SQLite Database (*.db *.sqlite);;All Files (*)",
         )
@@ -517,13 +517,13 @@ class MainWindow(QMainWindow):
     def _on_about(self) -> None:
         QMessageBox.about(
             self,
-            "About LoreKeeper",
-            "<h2>LoreKeeper</h2>"
+            "About World Garden",
+            "<h2>World Garden</h2>"
             "<p>Version 0.1.0</p>"
             "<p>A fully offline, local-first worldbuilding database and wiki<br>"
             "for tabletop RPG game masters, writers, and creators.</p>"
             "<p>Built with Python, PySide6, and SQLite FTS5.</p>"
-            "<p>© 2026 LoreKeeper Team</p>",
+            "<p>© 2026 World Garden Team</p>",
         )
 
     def _on_global_search_dialog(self) -> None:

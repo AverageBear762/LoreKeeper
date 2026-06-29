@@ -1,5 +1,5 @@
 """
-LoreKeeper — Default Article Templates.
+World Garden — Default Article Templates.
 
 Seeds the database with pre-built templates for common article types:
 Character, Item, Location, and Creature.

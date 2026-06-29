@@ -1,4 +1,4 @@
-# LoreKeeper
+# World Garden
 
 > **Fully offline, local-first worldbuilding database and wiki** for tabletop RPG game masters, writers, and creators.
 
@@ -6,7 +6,7 @@
 [![PySide6](https://img.shields.io/badge/PySide6-6.11+-green.svg)](https://wiki.qt.io/Qt_for_Python)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
 
-LoreKeeper offers rich structured articles, automatic backlinking, hover previews, and an interactive node-based travel map — all operating **100% offline**. Your data stays yours in open, human-readable formats (SQLite + optional JSON/Markdown exports).
+World Garden offers rich structured articles, automatic backlinking, hover previews, and an interactive node-based travel map — all operating **100% offline**. Your data stays yours in open, human-readable formats (SQLite + optional JSON/Markdown exports).
 
 **No subscriptions. No cloud. No telemetry. Your lore, your machine.**
 
@@ -50,7 +50,7 @@ pip install -r requirements.txt
 # 4. Run the database tests (optional, recommended)
 python test_database.py
 
-# 5. Launch LoreKeeper
+# 5. Launch World Garden
 python main.py
 
 # Or open a specific database file
@@ -59,13 +59,13 @@ python main.py /path/to/my_world.db
 
 ### First Launch
 
-On first launch, LoreKeeper creates a default database at:
+On first launch, World Garden creates a default database at:
 
 | Platform | Location |
 |---|---|
-| **Linux** | `~/.local/share/LoreKeeper/lorekeeper.db` |
-| **macOS** | `~/Library/Application Support/LoreKeeper/lorekeeper.db` |
-| **Windows** | `%APPDATA%\LoreKeeper\lorekeeper.db` |
+| **Linux** | `~/.local/share/World Garden/lorekeeper.db` |
+| **macOS** | `~/Library/Application Support/World Garden/lorekeeper.db` |
+| **Windows** | `%APPDATA%\World Garden\lorekeeper.db` |
 
 You can also pass a custom path as a CLI argument: `python main.py my_campaign.db`
 
@@ -92,10 +92,10 @@ pip install pyinstaller
 ./compile.sh --debug
 ```
 
-Output: `dist/LoreKeeper/` — run it with:
+Output: `dist/World Garden/` — run it with:
 
 ```bash
-./dist/LoreKeeper/LoreKeeper
+./dist/World Garden/World Garden
 ```
 
 ### Manual PyInstaller Build
@@ -130,16 +130,16 @@ pyinstaller lorekeeper.spec --onefile --noconfirm
 ./compile.sh
 
 # Code-sign (required for distribution)
-codesign -s "Developer ID Application: Your Name" dist/LoreKeeper.app
+codesign -s "Developer ID Application: Your Name" dist/World Garden.app
 
 # Create DMG installer
 # brew install create-dmg
-create-dmg --app "LoreKeeper" --volname "LoreKeeper" \
-    "LoreKeeper.dmg" "dist/LoreKeeper.app"
+create-dmg --app "World Garden" --volname "World Garden" \
+    "World Garden.dmg" "dist/World Garden.app"
 ```
 
 - The spec auto-detects macOS and sets `console=False`.
-- Without code-signing, Gatekeeper may block the app. Use `spctl --assess --verbose dist/LoreKeeper.app` to verify.
+- Without code-signing, Gatekeeper may block the app. Use `spctl --assess --verbose dist/World Garden.app` to verify.
 
 #### Windows
 
@@ -148,7 +148,7 @@ create-dmg --app "LoreKeeper" --volname "LoreKeeper" \
 python -m PyInstaller lorekeeper.spec --noconfirm
 
 :: Create installer with Inno Setup or NSIS
-:: Or simply zip dist/LoreKeeper/ as a portable app
+:: Or simply zip dist/World Garden/ as a portable app
 ```
 
 - The spec sets `console=False` — no terminal window appears on launch.
@@ -411,7 +411,7 @@ python test_database.py
 
 Proprietary. All rights reserved.
 
-LoreKeeper is **free** for personal use. The core desktop application remains free and open-source (code available). A "Pay What You Want" Pro License unlocks premium custom themes and advanced exports (interactive HTML bundles, styled PDFs).
+World Garden is **free** for personal use. The core desktop application remains free and open-source (code available). A "Pay What You Want" Pro License unlocks premium custom themes and advanced exports (interactive HTML bundles, styled PDFs).
 
 ---
 

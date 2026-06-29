@@ -1,5 +1,5 @@
 """
-LoreKeeper — DatabaseManager.
+World Garden — DatabaseManager.
 
 Singleton-style class that manages the SQLite connection, enables WAL mode,
 enforces foreign keys, and runs schema migrations on startup.
@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 class DatabaseManager:
     """
-    Thread-safe database manager for LoreKeeper.
+    Thread-safe database manager for World Garden.
 
     Usage::
 
@@ -172,7 +172,7 @@ class DatabaseManager:
         """Return a sensible default DB path inside the user's data dir."""
         try:
             import appdirs
-            data_dir = appdirs.user_data_dir("LoreKeeper", "LoreKeeper")
+            data_dir = appdirs.user_data_dir("World Garden", "World Garden")
         except ImportError:
             data_dir = os.path.join(str(Path.home()), ".lorekeeper")
         Path(data_dir).mkdir(parents=True, exist_ok=True)

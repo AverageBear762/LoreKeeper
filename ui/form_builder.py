@@ -1,5 +1,5 @@
 """
-LoreKeeper — Dynamic Form Builder.
+World Garden — Dynamic Form Builder.
 
 Generates Qt input widgets on-the-fly from an ArticleTemplate's field definitions.
 Supports: Text, LongText, Number, Boolean, Date, Select, Image.

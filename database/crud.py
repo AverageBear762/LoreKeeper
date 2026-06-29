@@ -1,5 +1,5 @@
 """
-LoreKeeper — CRUD operations for articles, templates, and maps.
+World Garden — CRUD operations for articles, templates, and maps.
 
 All functions accept / return model dataclass instances for clean
 separation between persistence and business logic.

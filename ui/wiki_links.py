@@ -1,5 +1,5 @@
 """
-LoreKeeper — Wiki Link Parser & Backlink Engine.
+World Garden — Wiki Link Parser & Backlink Engine.
 
 Parses `[[Article Name]]` syntax from markdown content, renders it as
 interactive HTML links, and computes backlinks ("What links here?").

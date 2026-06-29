@@ -1,5 +1,5 @@
 """
-LoreKeeper — Sidebar widget.
+World Garden — Sidebar widget.
 
 Contains:
 - Quick search bar
@@ -40,7 +40,7 @@ from database.models import Article, BUILTIN_ARTICLE_TYPES
 # ======================================================================
 
 class Sidebar(QFrame):
-    """Main sidebar panel for LoreKeeper."""
+    """Main sidebar panel for World Garden."""
 
     # Signals
     article_selected = Signal(str)       # article_id

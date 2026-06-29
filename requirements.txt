@@ -1,4 +1,4 @@
-# LoreKeeper — Core dependencies
+# World Garden — Core dependencies
 PySide6>=6.6.0
 Pillow>=10.0.0
 

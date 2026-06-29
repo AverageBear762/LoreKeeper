@@ -1,5 +1,5 @@
 """
-LoreKeeper — Interactive Location Travel Map.
+World Garden — Interactive Location Travel Map.
 
 Uses Qt Graphics View Framework (QGraphicsView / QGraphicsScene) to create
 an interactive canvas where users can:

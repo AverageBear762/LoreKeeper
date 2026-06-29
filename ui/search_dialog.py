@@ -1,5 +1,5 @@
 """
-LoreKeeper — Global Search Dialog.
+World Garden — Global Search Dialog.
 
 Full-text search powered by SQLite FTS5 with:
 - Real-time search results as you type

@@ -1,9 +1,9 @@
 <!-- managed:linked-repos -->
 ## Linked Repositories
-- AverageBear762/LoreKeeper
+- AverageBear762/World Garden
 <!-- /managed:linked-repos -->
 
-# LoreKeeper Code Workflow
+# World Garden Code Workflow
 
 ## Branch Strategy
 - Work on feature branches named `feat/<short-description>`
@@ -14,5 +14,5 @@
 - Squash merge is the default method
 
 ## Repo
-- GitHub: `AverageBear762/LoreKeeper`
-- Remote: `https://github.com/AverageBear762/LoreKeeper.git`
+- GitHub: `AverageBear762/WorldGarden`
+- Remote: `https://github.com/AverageBear762/WorldGarden.git`

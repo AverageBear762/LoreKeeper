@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive test suite for LoreKeeper database layer.
+Comprehensive test suite for World Garden database layer.
 
 Tests schema creation, CRUD operations, FTS5 search, map relationships,
 and data integrity constraints (foreign keys, cascading deletes).

@@ -1,5 +1,5 @@
 """
-LoreKeeper — Theme Manager.
+World Garden — Theme Manager.
 
 Provides light and dark palette-based themes with rich custom QSS stylesheets.
 Switching is instant and applies to the entire QApplication.
@@ -65,7 +65,7 @@ def _dark_palette() -> QPalette:
 # ---------------------------------------------------------------------------
 
 LIGHT_STYLESHEET = """
-/* === LoreKeeper Light Theme QSS === */
+/* === World Garden Light Theme QSS === */
 
 /* Main window & panels */
 QMainWindow { background-color: #f8f9fa; }
@@ -259,7 +259,7 @@ QMenu::separator {
 
 
 DARK_STYLESHEET = """
-/* === LoreKeeper Dark Theme QSS === */
+/* === World Garden Dark Theme QSS === */
 
 QMainWindow { background-color: #191923; }
 

@@ -1,5 +1,5 @@
 """
-LoreKeeper — Backup Manager.
+World Garden — Backup Manager.
 
 Provides:
 - Full JSON snapshot export (all articles, templates, map data)

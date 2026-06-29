@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# LoreKeeper — Cross-Platform Build Script
+# World Garden — Cross-Platform Build Script
 # ===========================================================================
 # Usage:
 #   ./compile.sh                  # Build for current platform
@@ -10,7 +10,7 @@
 #   ./compile.sh --upx            # Compress with UPX (if installed)
 #
 # Output:
-#   dist/LoreKeeper/    — One-directory bundle (run ./LoreKeeper/LoreKeeper)
+#   dist/WorldGarden/    — One-directory bundle (run ./WorldGarden/World Garden)
 # ===========================================================================
 
 set -euo pipefail
@@ -29,7 +29,7 @@ else
     PYTHON="python3"
 fi
 
-echo "=== LoreKeeper Build ==="
+echo "=== World Garden Build ==="
 echo "  Python:    $($PYTHON --version 2>&1)"
 echo "  PyInstaller: $($PYTHON -m PyInstaller --version 2>&1)"
 echo "  Platform:  $(uname -s) $(uname -m)"
@@ -41,7 +41,7 @@ CLEAN=false
 DEBUG=false
 ONEFILE=false
 UPX=""
-SPEC="lorekeeper.spec"
+SPEC="world_garden.spec"
 
 for arg in "$@"; do
     case "$arg" in
@@ -75,7 +75,7 @@ $PYTHON test_database.py || { echo "    TESTS FAILED! Aborting build."; exit 1; 
 echo ""
 
 # --- Build executable -----------------------------------------------------
-echo ">>> Building LoreKeeper executable..."
+echo ">>> Building World Garden executable..."
 echo "    Spec:     $SPEC"
 echo "    Onefile:  $ONEFILE"
 echo "    Debug:    $DEBUG"
@@ -101,21 +101,21 @@ echo "=== Build Complete ==="
 
 # --- Show output ----------------------------------------------------------
 if [ "$ONEFILE" = true ]; then
-    if [ -f "dist/LoreKeeper" ]; then
-        echo "  Executable: dist/LoreKeeper"
-        ls -lh "dist/LoreKeeper"
-    elif [ -f "dist/LoreKeeper.exe" ]; then
-        echo "  Executable: dist/LoreKeeper.exe"
-        ls -lh "dist/LoreKeeper.exe"
+    if [ -f "dist/WorldGarden" ]; then
+        echo "  Executable: dist/WorldGarden"
+        ls -lh "dist/WorldGarden"
+    elif [ -f "dist/WorldGarden.exe" ]; then
+        echo "  Executable: dist/WorldGarden.exe"
+        ls -lh "dist/WorldGarden.exe"
     fi
 else
-    if [ -d "dist/LoreKeeper" ]; then
-        echo "  Bundle: dist/LoreKeeper/"
+    if [ -d "dist/WorldGarden" ]; then
+        echo "  Bundle: dist/WorldGarden/"
         echo "  Size:"
-        du -sh "dist/LoreKeeper/" 2>/dev/null || echo "    (check with 'du')"
+        du -sh "dist/WorldGarden/" 2>/dev/null || echo "    (check with 'du')"
         echo ""
         echo "  To run:"
-        echo "    ./dist/LoreKeeper/LoreKeeper"
+        echo "    ./dist/WorldGarde./WorldGarden"
     fi
 fi
 
@@ -128,11 +128,11 @@ case "$(uname -s)" in
         echo "  Test on target distros with the minimum glibc you support."
         ;;
     Darwin)
-        echo "  macOS build. Run 'codesign -s <identity> dist/LoreKeeper.app'"
+        echo "  macOS build. Run 'codesign -s <identity> dist/WorldGarden.app'"
         echo "  before distribution. Use 'create-dmg' for a DMG installer."
         ;;
     MINGW*|MSYS*|CYGWIN*)
         echo "  Windows build. Use Inno Setup or NSIS to create an installer."
-        echo "  Or just zip dist/LoreKeeper/ and distribute as a portable app."
+        echo "  Or just zip dist/WorldGarden/ and distribute as a portable app."
         ;;
 esac

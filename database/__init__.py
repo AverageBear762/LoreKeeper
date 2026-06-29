@@ -1,5 +1,5 @@
 """
-LoreKeeper — Offline local-first worldbuilding database.
+World Garden — Offline local-first worldbuilding database.
 
 Database layer providing:
 - SQLite with WAL mode, FTS5 full-text search, foreign keys

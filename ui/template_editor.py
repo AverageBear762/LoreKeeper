@@ -1,5 +1,5 @@
 """
-LoreKeeper — Template Editor.
+World Garden — Template Editor.
 
 Dialog for creating, editing, and managing article template schemas.
 Users can add/remove/reorder fields and configure each field's type, label, and options.

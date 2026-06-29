@@ -1,5 +1,5 @@
 """
-LoreKeeper — SQLite schema definitions and migration.
+World Garden — SQLite schema definitions and migration.
 
 Uses a simple schema version table to track migrations.
 On startup, the database creates all tables if they don't exist

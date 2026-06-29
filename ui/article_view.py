@@ -1,5 +1,5 @@
 """
-LoreKeeper — Article View & Editor.
+World Garden — Article View & Editor.
 
 Central widget for displaying and editing wiki articles with:
 - Title editing
@@ -335,7 +335,7 @@ class ArticleView(QFrame):
 
         # -- Welcome placeholder --
         self.placeholder = QLabel(
-            "Welcome to LoreKeeper\n\n"
+            "Welcome to World Garden\n\n"
             "Select an article from the sidebar or create a new one.\n\n"
             "🗺  Use the Travel Map to visualize locations.\n"
             "🔍  Search for articles by name or content."
