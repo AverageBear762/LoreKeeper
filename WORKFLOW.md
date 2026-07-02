@@ -1,6 +1,6 @@
 <!-- managed:linked-repos -->
 ## Linked Repositories
-- AverageBear762/WorldGarden
+- AverageBear762/LoreKeeper
 <!-- /managed:linked-repos -->
 
 # World Garden Code Workflow

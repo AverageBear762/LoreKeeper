@@ -426,6 +426,7 @@ class MapScene(QGraphicsScene):
         self._connections: dict[str, MapConnectionItem] = {}
         self._bg_image: Optional[QGraphicsPixmapItem] = None
         self._bg_pixmap: Optional[QPixmap] = None
+        self._bg_path: Optional[str] = None
         self._drawing_connection_nodes: list[MapNodeItem] = []
         self._temp_line: Optional[QGraphicsLineItem] = None
 
@@ -448,6 +449,7 @@ class MapScene(QGraphicsScene):
         if self._bg_image:
             self.removeItem(self._bg_image)
 
+        self._bg_path = path
         self._bg_pixmap = pix
         self._bg_image = QGraphicsPixmapItem(pix)
         self._bg_image.setZValue(-100)
@@ -466,6 +468,7 @@ class MapScene(QGraphicsScene):
             self.removeItem(self._bg_image)
             self._bg_image = None
             self._bg_pixmap = None
+            self._bg_path = None
 
     # ----------------------------------------------------------------
     # Node management
@@ -803,7 +806,13 @@ class TravelMapWidget(QWidget):
         """Reload all map data from the database."""
         self._scene._nodes.clear()
         self._scene._connections.clear()
+        # Preserve background across reload
+        saved_bg = self._scene._bg_path
         self._scene.clear()
+        self._scene._bg_image = None
+        self._scene._bg_pixmap = None
+        if saved_bg:
+            self._scene.set_background_image(saved_bg)
         self._load_from_db()
 
     def save_to_db(self) -> None:

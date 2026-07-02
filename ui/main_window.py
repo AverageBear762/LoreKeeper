@@ -376,12 +376,14 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"New {article_type}: {article.id[:8]}...")
             self.sidebar.refresh_recent()
             self.sidebar.refresh_favorites()
+            self.sidebar.refresh_category_tree()
 
     def _on_save(self) -> None:
         """Save the current article."""
         if self.article_view.save():
             self.status_label.setText("Article saved")
             self.sidebar.refresh_recent()
+            self.sidebar.refresh_category_tree()
         else:
             self.status_label.setText("Save failed")
 
@@ -440,6 +442,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Deleted: {article.title}")
             self.sidebar.refresh_favorites()
             self.sidebar.refresh_recent()
+            self.sidebar.refresh_category_tree()
 
     def _on_toggle_theme(self) -> None:
         new_theme = self.theme.toggle()
