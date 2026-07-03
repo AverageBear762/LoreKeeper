@@ -300,14 +300,15 @@ class TemplateManagementDialog(QDialog):
         types = crud.list_all_article_types()
         for t in types:
             item = QListWidgetItem(t)
-            # Check if it's a custom template (not built-in)
+            template = crud.get_template_by_type_name(t)
             from database.models import BUILTIN_ARTICLE_TYPES
             if t in BUILTIN_ARTICLE_TYPES:
-                item.setToolTip("Built-in type (cannot be edited)")
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                item.setForeground(Qt.GlobalColor.gray)
+                if template:
+                    item.setToolTip("Base template — click Edit to customize")
+                    item.setData(Qt.ItemDataRole.UserRole, template.id)
+                else:
+                    item.setToolTip("Base type — click Edit to create a custom template")
             else:
-                template = crud.get_template_by_type_name(t)
                 if template:
                     item.setData(Qt.ItemDataRole.UserRole, template.id)
             self.template_list.addItem(item)

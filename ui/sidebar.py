@@ -186,7 +186,13 @@ class Sidebar(QFrame):
             roots_by_type[t].append((root, children))
 
         for t in all_types:
-            type_root = QTreeWidgetItem([t])
+            # Only show types that have articles
+            roots = roots_by_type.get(t, [])
+            total_count = len(roots) + sum(len(c) for _, c in roots)
+            if total_count == 0:
+                continue  # Skip empty types
+
+            type_root = QTreeWidgetItem([f"{t}  ({total_count})"])
             type_root.setData(0, Qt.ItemDataRole.UserRole, t)
             type_root.setData(0, Qt.ItemDataRole.DecorationRole, self._type_icon(t))
             type_root.setFlags(type_root.flags() | Qt.ItemFlag.ItemIsEnabled)
@@ -212,10 +218,9 @@ class Sidebar(QFrame):
                     child_item.setToolTip(0, f"Child of: {root_article.title}")
                     root_item.addChild(child_item)
 
-            # Show count for the type header
-            count = type_root.childCount()
-            if count > 0:
-                type_root.setText(0, f"{t}  ({count})")
+            # Update count on type header
+            child_count = type_root.childCount()
+            type_root.setText(0, f"{t}  ({child_count})")
 
     # ------------------------------------------------------------------
     # Slots
