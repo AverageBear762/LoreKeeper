@@ -85,6 +85,7 @@ class FormFieldWidget(QWidget):
         if ft == "text":
             w = QLineEdit()
             w.setPlaceholderText(defn.placeholder or "")
+            w.setMaxLength(255)
             if isinstance(value, str):
                 w.setText(value)
             w.textChanged.connect(self.value_changed.emit)
@@ -93,7 +94,9 @@ class FormFieldWidget(QWidget):
         elif ft == "longtext":
             w = QPlainTextEdit()
             w.setPlaceholderText(defn.placeholder or "")
-            w.setMinimumHeight(100)
+            w.setMinimumHeight(120)
+            w.setMaximumHeight(300)
+            w.setStyleSheet("QPlainTextEdit { line-height: 1.4; padding: 6px; }")
             if isinstance(value, str):
                 w.setPlainText(value)
             w.textChanged.connect(self.value_changed.emit)

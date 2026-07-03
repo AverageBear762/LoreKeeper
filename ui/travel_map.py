@@ -119,6 +119,8 @@ class MapNodeItem(QGraphicsEllipseItem):
         self._on_moved = on_moved
         self._on_clicked = on_clicked
         self._on_double_clicked = on_double_clicked
+        self._drag_start_pos: Optional[QPointF] = None
+        self._was_dragged = False
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
@@ -175,9 +177,25 @@ class MapNodeItem(QGraphicsEllipseItem):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._on_clicked:
-            self._on_clicked(self._node_data.id)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.scenePos()
+            self._was_dragged = False
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start_pos:
+            dist = (event.scenePos() - self._drag_start_pos).manhattanLength()
+            if dist > 10:
+                self._was_dragged = True
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self._was_dragged and self._on_clicked:
+                self._on_clicked(self._node_data.id)
+            self._drag_start_pos = None
+            self._was_dragged = False
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._on_double_clicked:
@@ -267,6 +285,8 @@ class MapNodeItem(QGraphicsEllipseItem):
 class MapConnectionItem(QGraphicsLineItem):
     """A travel path/connection between two map nodes."""
 
+    CLICK_HIT_WIDTH = 12  # Wider clickable area than visible line
+
     def __init__(
         self,
         conn_data: MapConnection,
@@ -296,6 +316,18 @@ class MapConnectionItem(QGraphicsLineItem):
 
         # Position the label at midpoint
         self._update_position()
+
+    def shape(self) -> QPainterPath:
+        """Return a wider clickable shape for easier clicking."""
+        path = QPainterPath()
+        line = self.line()
+        if line.length() < 1:
+            return path
+        path.moveTo(line.p1())
+        path.lineTo(line.p2())
+        stroker = QPainterPathStroker()
+        stroker.setWidth(self.CLICK_HIT_WIDTH)
+        return stroker.createStroke(path)
 
     def _build_label_text(self) -> str:
         parts = []
@@ -437,7 +469,7 @@ class MapScene(QGraphicsScene):
     # ----------------------------------------------------------------
 
     def set_background_image(self, path: str) -> bool:
-        """Load and display a background map image."""
+        """Load and display a background map image, centered on scene origin."""
         if not os.path.isfile(path):
             return False
 
@@ -452,8 +484,11 @@ class MapScene(QGraphicsScene):
         self._bg_path = path
         self._bg_pixmap = pix
         self._bg_image = QGraphicsPixmapItem(pix)
+        # Center the image on scene origin (0,0)
+        self._bg_image.setPos(-pix.width() / 2, -pix.height() / 2)
         self._bg_image.setZValue(-100)
         self._bg_image.setOpacity(0.8)
+        self._bg_image.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self.addItem(self._bg_image)
 
         # Resize scene to fit

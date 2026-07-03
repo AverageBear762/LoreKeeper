@@ -106,9 +106,11 @@ class FieldEditorRow(QWidget):
         pass
 
     def get_field_definition(self) -> FieldDefinition:
+        raw_name = self.name_edit.text().strip()
+        raw_label = self.label_edit.text().strip()
         return FieldDefinition(
-            name=self.name_edit.text().strip() or "unnamed_field",
-            label=self.label_edit.text().strip() or self.name_edit.text().strip() or "Unnamed",
+            name=raw_name or "unnamed_field",
+            label=raw_label or raw_name.replace("_", " ") or "Unnamed",
             field_type=self.type_combo.currentData() or "text",
             required=self.required_cb.isChecked(),
             options=self._def.options if self._def.field_type == "select" else [],
