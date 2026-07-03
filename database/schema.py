@@ -15,7 +15,7 @@ from typing import Any
 # Schema version tracking
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2  # bump when adding new migrations
+SCHEMA_VERSION = 3  # bump when adding new migrations
 
 CREATE_SCHEMA_VERSION = """
 CREATE TABLE IF NOT EXISTS _schema_version (
@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS map_connections (
     terrain    TEXT NOT NULL DEFAULT '',
     danger     TEXT NOT NULL DEFAULT 'low',
     notes      TEXT NOT NULL DEFAULT '',
+    show_on_map INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (node_a_id) REFERENCES map_nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (node_b_id) REFERENCES map_nodes(id) ON DELETE CASCADE
 );
@@ -204,6 +205,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         _migrate_v2(conn)
         set_schema_version(conn, 2)
 
+    # v3: Add show_on_map column for map connection metadata display
+    if current < 3:
+        _migrate_v3(conn)
+        set_schema_version(conn, 3)
+
     # Future migrations go here:
     # if current < 2:
     #     _migrate_v2(conn)
@@ -233,3 +239,19 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_articles_parent ON articles(parent_id)"
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Migration: v3 — show_on_map column for map connections
+# ---------------------------------------------------------------------------
+
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """Add show_on_map column to map_connections table."""
+    try:
+        conn.execute(
+            "ALTER TABLE map_connections ADD COLUMN show_on_map "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists

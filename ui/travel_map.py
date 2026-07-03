@@ -316,6 +316,12 @@ class MapConnectionItem(QGraphicsLineItem):
 
         # Position the label at midpoint
         self._update_position()
+        # Set label visibility based on show_on_map flag
+        self._update_label_visibility()
+
+    def _update_label_visibility(self) -> None:
+        """Show or hide the label based on the show_on_map flag."""
+        self._label.setVisible(self._conn_data.show_on_map)
 
     def shape(self) -> QPainterPath:
         """Return a wider clickable shape for easier clicking."""
@@ -950,7 +956,7 @@ class TravelMapWidget(QWidget):
         """Dialog to edit connection metadata."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Edit Travel Path")
-        dialog.setMinimumWidth(350)
+        dialog.setMinimumWidth(400)
 
         layout = QFormLayout(dialog)
 
@@ -977,6 +983,11 @@ class TravelMapWidget(QWidget):
         notes = QLineEdit(conn_data.notes)
         layout.addRow("Notes:", notes)
 
+        show_on_map = QCheckBox("Display metadata on map")
+        show_on_map.setChecked(conn_data.show_on_map)
+        show_on_map.setToolTip("Show distance/time label at midpoint between nodes")
+        layout.addRow("", show_on_map)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
@@ -995,10 +1006,13 @@ class TravelMapWidget(QWidget):
             conn_data.terrain = terrain.text().strip()
             conn_data.danger = danger.currentText().lower()
             conn_data.notes = notes.text().strip()
+            conn_data.show_on_map = show_on_map.isChecked()
             crud.update_map_connection(conn_data)
             if conn_data.id in self._scene._connections:
-                self._scene._connections[conn_data.id]._update_pen()
-                self._scene._connections[conn_data.id]._update_position()
+                conn_item = self._scene._connections[conn_data.id]
+                conn_item._update_pen()
+                conn_item._update_position()
+                conn_item._update_label_visibility()
 
     def _delete_connection(self, connection_id: str, dialog: QDialog) -> None:
         self._scene.remove_connection(connection_id)

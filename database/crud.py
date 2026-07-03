@@ -371,9 +371,9 @@ def create_map_connection(connection: MapConnection) -> MapConnection:
         """
         INSERT INTO map_connections
             (id, node_a_id, node_b_id, distance, travel_time,
-             terrain, danger, notes)
+             terrain, danger, notes, show_on_map)
         VALUES (:id, :node_a_id, :node_b_id, :distance, :travel_time,
-                :terrain, :danger, :notes)
+                :terrain, :danger, :notes, :show_on_map)
         """,
         connection.to_row(),
     )
@@ -397,7 +397,8 @@ def update_map_connection(connection: MapConnection) -> MapConnection:
             travel_time = :travel_time,
             terrain = :terrain,
             danger = :danger,
-            notes = :notes
+            notes = :notes,
+            show_on_map = :show_on_map
         WHERE id = :id
         """,
         connection.to_row(),

@@ -221,6 +221,7 @@ class MapConnection:
     terrain: str = ""              # e.g. "mountain", "forest", "plains"
     danger: str = "low"            # low / medium / high / extreme
     notes: str = ""
+    show_on_map: bool = False      # Display metadata label on the map
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -232,6 +233,7 @@ class MapConnection:
             "terrain": self.terrain,
             "danger": self.danger,
             "notes": self.notes,
+            "show_on_map": 1 if self.show_on_map else 0,
         }
 
     @classmethod
@@ -245,4 +247,5 @@ class MapConnection:
             terrain=row.get("terrain", ""),
             danger=row.get("danger", "low"),
             notes=row.get("notes", ""),
+            show_on_map=bool(row.get("show_on_map", 0)),
         )
