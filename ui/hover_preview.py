@@ -202,10 +202,13 @@ class HoverPreviewWidget(QFrame):
         if portrait_path and os.path.isfile(portrait_path):
             pix = QPixmap(portrait_path)
             if not pix.isNull():
-                self.portrait_label.setPixmap(
-                    pix.scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio,
-                               Qt.TransformationMode.SmoothTransformation)
-                )
+                # Show at native resolution (max 120x120 to avoid overflow)
+                if pix.width() > 120 or pix.height() > 120:
+                    pix = pix.scaled(
+                        120, 120, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                self.portrait_label.setPixmap(pix)
                 self.portrait_label.setText("")
             else:
                 self.portrait_label.setText("🖼")

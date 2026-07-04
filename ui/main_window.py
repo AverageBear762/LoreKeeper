@@ -153,17 +153,22 @@ class MainWindow(QMainWindow):
 
         # -- View --
         view_menu = menubar.addMenu("&View")
+        self.act_articles_view = QAction("&Articles", self)
+        self.act_articles_view.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        self.act_articles_view.triggered.connect(self._switch_to_article_view)
+        view_menu.addAction(self.act_articles_view)
+
+        self.act_travel_map_view = QAction("&Travel Map", self)
+        self.act_travel_map_view.setShortcut(QKeySequence("Ctrl+M"))
+        self.act_travel_map_view.triggered.connect(self._on_travel_map)
+        view_menu.addAction(self.act_travel_map_view)
+
+        view_menu.addSeparator()
+
         self.act_toggle_theme = QAction("Toggle &Dark Mode", self)
         self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+D"))
         self.act_toggle_theme.triggered.connect(self._on_toggle_theme)
         view_menu.addAction(self.act_toggle_theme)
-
-        view_menu.addSeparator()
-
-        self.act_travel_map = QAction("&Travel Map", self)
-        self.act_travel_map.setShortcut(QKeySequence("Ctrl+M"))
-        self.act_travel_map.triggered.connect(self._on_travel_map)
-        view_menu.addAction(self.act_travel_map)
 
         # -- Help --
         help_menu = menubar.addMenu("&Help")
@@ -225,25 +230,10 @@ class MainWindow(QMainWindow):
         self.tb_theme.clicked.connect(self._on_toggle_theme)
         toolbar.addWidget(self.tb_theme)
 
-        toolbar.addSeparator()
-
-        self.tb_map = QPushButton("🗺 Map")
-        self.tb_map.setObjectName("ToolBtn")
-        self.tb_map.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.tb_map.clicked.connect(self._on_travel_map)
-        toolbar.addWidget(self.tb_map)
-
         # Spacer
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-
-        # Quick search in toolbar
-        self.toolbar_search = QPushButton("🔍 Search")
-        self.toolbar_search.setObjectName("ToolBtn")
-        self.toolbar_search.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toolbar_search.clicked.connect(lambda: self.sidebar.search_bar.setFocus())
-        toolbar.addWidget(self.toolbar_search)
 
     def _build_central(self) -> None:
         """Build the main content area with sidebar + tabbed views."""
@@ -292,7 +282,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter)
 
         # Connect signals
-        self.sidebar.article_selected.connect(self.article_view.load_article_by_id)
+        self.sidebar.article_selected.connect(self._on_sidebar_article_selected)
         self.sidebar.search_requested.connect(self._on_global_search)
         self.sidebar.travel_map_requested.connect(self._switch_to_travel_map)
         self.sidebar.create_article_requested.connect(self._on_new_article)
@@ -497,6 +487,11 @@ class MainWindow(QMainWindow):
             self.status_label.setText("🗺 Travel Map")
         else:
             self.status_label.setText("Wiki View")
+
+    def _on_sidebar_article_selected(self, article_id: str) -> None:
+        """Navigate to an article from sidebar — switch to Articles tab first."""
+        self._switch_to_article_view()
+        self.article_view.load_article_by_id(article_id)
 
     def _on_travel_map_navigate(self, article_id: str) -> None:
         """Navigate from travel map to an article."""

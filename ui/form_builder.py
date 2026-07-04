@@ -124,7 +124,7 @@ class FormFieldWidget(QWidget):
 
         elif ft == "date":
             w = QDateEdit()
-            w.setCalendarPopup(True)
+            w.setCalendarPopup(False)  # Disabled due to rendering bugs
             w.setSpecialValueText("Not set")
             w.setDisplayFormat("yyyy-MM-dd")
             w.clear()
