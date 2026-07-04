@@ -296,6 +296,7 @@ class MainWindow(QMainWindow):
         self.sidebar.search_requested.connect(self._on_global_search)
         self.sidebar.travel_map_requested.connect(self._switch_to_travel_map)
         self.sidebar.create_article_requested.connect(self._on_new_article)
+        self.sidebar.delete_article_requested.connect(self._on_delete_article_by_id)
 
         # Travel map signals
         self.travel_map.article_navigated.connect(self._on_travel_map_navigate)
@@ -437,12 +438,35 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No,
         )
         if result == QMessageBox.StandardButton.Yes:
-            crud.delete_article(article.id)
+            self._perform_delete_article(article.id, article.title)
+
+    def _on_delete_article_by_id(self, article_id: str) -> None:
+        """Delete an article by id (from sidebar context menu)."""
+        article = crud.get_article(article_id)
+        if not article:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Delete Article",
+            f'Are you sure you want to delete "{article.title}"?\n'
+            "This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self._perform_delete_article(article.id, article.title)
+
+    def _perform_delete_article(self, article_id: str, title: str) -> None:
+        """Common delete logic used by both delete paths."""
+        crud.delete_article(article_id)
+        if (self.article_view.current_article
+                and self.article_view.current_article.id == article_id):
             self.article_view.clear()
-            self.status_label.setText(f"Deleted: {article.title}")
-            self.sidebar.refresh_favorites()
-            self.sidebar.refresh_recent()
-            self.sidebar.refresh_category_tree()
+        self.status_label.setText(f"Deleted: {title}")
+        self.sidebar.refresh_favorites()
+        self.sidebar.refresh_recent()
+        self.sidebar.refresh_category_tree()
 
     def _on_toggle_theme(self) -> None:
         new_theme = self.theme.toggle()
@@ -610,6 +634,8 @@ class MainWindow(QMainWindow):
                 self.article_view.load_article(article)
                 self.status_label.setText(f'Created: "{article_name}" ({article_type})')
                 self.sidebar.refresh_recent()
+                # Refresh autocomplete so the new article appears in [[ suggestions
+                self.article_view._link_autocomplete.refresh()
 
     # ------------------------------------------------------------------
     # Internal

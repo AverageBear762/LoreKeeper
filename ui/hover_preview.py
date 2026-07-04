@@ -185,6 +185,9 @@ class HoverPreviewWidget(QFrame):
 
         self._populate(article)
         self._position_near(global_pos)
+
+        # Ensure valid geometry before showing to prevent Qt geometry warnings
+        self.adjustSize()
         self._fade_in()
 
     def _populate(self, article: Article) -> None:
@@ -290,6 +293,10 @@ class HoverPreviewWidget(QFrame):
                 x = screen_geom.left() + 4
             if y < screen_geom.top():
                 y = screen_geom.top() + 4
+        else:
+            # Fallback: clamp to reasonable screen bounds
+            x = max(0, min(x, 1920 - self.PREVIEW_WIDTH))
+            y = max(0, min(y, 1080 - self.PREVIEW_MAX_HEIGHT))
 
         self.move(x, y)
 
@@ -387,7 +394,8 @@ class HoverTracker:
     def stop(self) -> None:
         """Cancel any pending hover and hide tooltip."""
         self._hover_timer.stop()
-        self._tooltip.fade_out()
+        self._tooltip._stop_fade()
+        self._tooltip.hide()
         self._is_hovering = False
         self._current_article_name = None
 
@@ -399,9 +407,10 @@ class HoverTracker:
 
         if article_name:
             if article_name != self._current_article_name:
-                # New link hovered — restart timer
+                # New link hovered — stop any fade and restart timer
                 self._hover_timer.stop()
-                self._tooltip.fade_out()
+                self._tooltip._stop_fade()
+                self._tooltip.hide()
                 self._current_article_name = article_name
                 self._is_hovering = True
                 self._hover_timer.start()

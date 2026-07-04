@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -47,6 +47,7 @@ class Sidebar(QFrame):
     search_requested = Signal(str)       # search query
     travel_map_requested = Signal()
     create_article_requested = Signal()
+    delete_article_requested = Signal(str)  # article_id
 
     SECTION_STYLE = "QLabel#SectionHeader {}"
     LINK_STYLE = "QLabel#SidebarLink {}"
@@ -109,6 +110,8 @@ class Sidebar(QFrame):
         self.type_tree.setAnimated(True)
         self.type_tree.setFrameShape(QFrame.Shape.NoFrame)
         self.type_tree.setMinimumHeight(200)
+        self.type_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.type_tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self.type_tree.itemClicked.connect(self._on_tree_item_clicked)
         scroll_layout.addWidget(self.type_tree)
 
@@ -247,6 +250,22 @@ class Sidebar(QFrame):
             results = crud.list_articles(article_type=article_id, limit=200)
             if results:
                 self.article_selected.emit(results[0].id)
+
+    def _on_tree_context_menu(self, pos) -> None:
+        """Right-click context menu on the category tree."""
+        item = self.type_tree.itemAt(pos)
+        if not item:
+            return
+        article_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not article_id or len(article_id) != 36:
+            return  # Only show for article items, not type headers
+
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act_delete = QAction("🗑 Delete Article", self)
+        act_delete.triggered.connect(lambda: self.delete_article_requested.emit(article_id))
+        menu.addAction(act_delete)
+        menu.exec(self.type_tree.viewport().mapToGlobal(pos))
 
     def _on_favorite_clicked(self, item: QListWidgetItem) -> None:
         article_id = item.data(Qt.ItemDataRole.UserRole)

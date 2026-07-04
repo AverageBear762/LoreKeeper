@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -83,6 +84,18 @@ class FieldEditorRow(QWidget):
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         layout.addWidget(self.type_combo)
 
+        # Edit options button (visible only for select type)
+        self.edit_options_btn = QPushButton("Options...")
+        self.edit_options_btn.setMaximumWidth(80)
+        self.edit_options_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.edit_options_btn.setStyleSheet(
+            "QPushButton { font-size: 10px; padding: 2px 6px; }"
+        )
+        self.edit_options_btn.clicked.connect(self._on_edit_options)
+        self.edit_options_btn.setVisible(self._def.field_type == "select"
+                                         and bool(self._def.options))
+        layout.addWidget(self.edit_options_btn)
+
         # Required checkbox
         self.required_cb = type(self)  # placeholder, will be QCheckBox
         from PySide6.QtWidgets import QCheckBox as QCB
@@ -102,8 +115,40 @@ class FieldEditorRow(QWidget):
 
     def _on_type_changed(self, idx: int) -> None:
         """Show/hide options editor for 'select' type."""
-        # We'll handle options through a separate dialog
-        pass
+        is_select = self.type_combo.currentData() == "select"
+        self.edit_options_btn.setVisible(is_select)
+        if is_select and not self._def.options:
+            # Open options editor automatically when switching to Dropdown
+            self._on_edit_options()
+
+    def _on_edit_options(self) -> None:
+        """Open a dialog to edit dropdown options."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Dropdown Options")
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Enter one option per line:"))
+
+        options_edit = QPlainTextEdit()
+        options_edit.setPlaceholderText("Option 1\nOption 2\nOption 3")
+        options_edit.setPlainText("\n".join(self._def.options or []))
+        layout.addWidget(options_edit, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_options = [
+                line.strip() for line in options_edit.toPlainText().split("\n")
+                if line.strip()
+            ]
+            self._def.options = new_options
 
     def get_field_definition(self) -> FieldDefinition:
         raw_name = self.name_edit.text().strip()

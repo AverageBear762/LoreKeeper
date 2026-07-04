@@ -195,6 +195,12 @@ class ArticleView(QFrame):
         self._article: Optional[Article] = None
         self._edit_mode: bool = True
 
+        # Debounced auto-save timer (2 seconds after typing stops)
+        self._debounce_timer = QTimer()
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(2000)  # 2 seconds
+        self._debounce_timer.timeout.connect(self._on_debounce_save)
+
         # Hover tooltip system
         self._tooltip = HoverPreviewWidget()
         self._hover_tracker = HoverTracker(self._tooltip)
@@ -228,6 +234,8 @@ class ArticleView(QFrame):
         scroll_layout.setSpacing(8)
 
         # -- Title --
+        title_container = QHBoxLayout()
+        title_container.setSpacing(4)
         self.title_edit = QLineEdit()
         self.title_edit.setObjectName("ArticleTitle")
         self.title_edit.setPlaceholderText("Article Title")
@@ -235,7 +243,22 @@ class ArticleView(QFrame):
             "font-size: 24px; font-weight: 600; border: none;"
             " padding: 4px 0; margin-bottom: 4px;"
         )
-        scroll_layout.addWidget(self.title_edit)
+        title_container.addWidget(self.title_edit, 1)
+
+        # Favorite star button
+        self.favorite_btn = QPushButton("☆")
+        self.favorite_btn.setObjectName("FavoriteBtn")
+        self.favorite_btn.setFixedSize(32, 32)
+        self.favorite_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.favorite_btn.setToolTip("Toggle favorite")
+        self.favorite_btn.setStyleSheet(
+            "QPushButton { font-size: 20px; border: none; background: transparent; }"
+            "QPushButton:hover { background: palette(AlternateBase); border-radius: 4px; }"
+        )
+        self.favorite_btn.clicked.connect(self._on_toggle_favorite)
+        title_container.addWidget(self.favorite_btn)
+
+        scroll_layout.addLayout(title_container)
 
         # -- Splitter: content area (left) + template fields (right) --
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -371,6 +394,15 @@ class ArticleView(QFrame):
 
         self.metadata_bar.set_metadata(article)
 
+        # Update favorite star
+        self.favorite_btn.setText("★" if article.is_favorite else "☆")
+        self.favorite_btn.setStyleSheet(
+            "QPushButton { font-size: 20px; border: none; background: transparent;"
+            " color: %s; }"
+            "QPushButton:hover { background: palette(AlternateBase); border-radius: 4px; }"
+            % ("#ffc107" if article.is_favorite else "palette(Text)")
+        )
+
         # Refresh preview
         self.preview_browser.set_wiki_content(article.content)
 
@@ -443,6 +475,8 @@ class ArticleView(QFrame):
         self.load_article(article)
         self.title_edit.setFocus()
         self.title_edit.selectAll()
+        # Refresh autocomplete to include the new article
+        self._link_autocomplete.refresh()
         return article
 
     @property
@@ -613,6 +647,28 @@ class ArticleView(QFrame):
         if self._article:
             self.save_indicator.setText("✎ Unsaved changes")
             self.content_changed.emit()
+            # Restart the 2-second debounce timer
+            self._debounce_timer.start()
+
+    def _on_toggle_favorite(self) -> None:
+        """Toggle the favorite state of the current article."""
+        if not self._article:
+            return
+        new_state = crud.toggle_favorite(self._article.id)
+        self._article.is_favorite = new_state
+        self.favorite_btn.setText("★" if new_state else "☆")
+        self.favorite_btn.setStyleSheet(
+            "QPushButton { font-size: 20px; border: none; background: transparent;"
+            " color: %s; }"
+            "QPushButton:hover { background: palette(AlternateBase); border-radius: 4px; }"
+            % ("#ffc107" if new_state else "palette(Text)")
+        )
+        self.article_updated.emit(self._article.id)
+
+    def _on_debounce_save(self) -> None:
+        """Auto-save triggered 2 seconds after the user stops typing."""
+        if self._article and self.is_dirty:
+            self.save()
 
     def _on_edit_mode_toggled(self, checked: bool) -> None:
         if checked:
