@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self._autosave_timer = QTimer(self)
         self._db: Optional[DatabaseManager] = None
         self._search_dialog: Optional[SearchDialog] = None
+        self._controller: Optional[Any] = None
 
         self.setWindowTitle(self.APP_TITLE)
         self.setMinimumSize(1024, 680)
@@ -86,7 +87,7 @@ class MainWindow(QMainWindow):
         # -- File --
         file_menu = menubar.addMenu("&World")
 
-        self.act_new_world = QAction("&Create New World...", self)
+        self.act_new_world = QAction("&New World...", self)
         self.act_new_world.setShortcut(QKeySequence("Ctrl+Shift+N"))
         self.act_new_world.triggered.connect(self._on_create_new_world)
         file_menu.addAction(self.act_new_world)
@@ -96,7 +97,17 @@ class MainWindow(QMainWindow):
         self.act_open_world.triggered.connect(self._on_open_world)
         file_menu.addAction(self.act_open_world)
 
-        self.act_save_world_as = QAction("Save World &As...", self)
+        # Recent Worlds submenu
+        self.recent_worlds_menu = file_menu.addMenu("📂 Recent Worlds")
+        self.recent_worlds_menu.aboutToShow.connect(self._populate_recent_worlds)
+
+        file_menu.addSeparator()
+
+        self.act_close_world = QAction("&Close World", self)
+        self.act_close_world.triggered.connect(self._on_close_world)
+        file_menu.addAction(self.act_close_world)
+
+        self.act_save_world_as = QAction("&Backup World As...", self)
         self.act_save_world_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.act_save_world_as.triggered.connect(self._on_save_world_as)
         file_menu.addAction(self.act_save_world_as)
@@ -335,6 +346,10 @@ class MainWindow(QMainWindow):
     # Public API
     # ------------------------------------------------------------------
 
+    def set_controller(self, controller: Any) -> None:
+        """Set the ApplicationController for world management callbacks."""
+        self._controller = controller
+
     def open_database(self, db_path: str) -> None:
         """Open a World Garden database file and refresh the UI."""
         db = DatabaseManager()
@@ -519,6 +534,51 @@ class MainWindow(QMainWindow):
         self.status_label.setText("World loaded")
         # Refresh travel map
         self.travel_map.reload()
+
+    def _on_close_world(self) -> None:
+        """Close the current world and return to the World Manager."""
+        if self._controller:
+            self._controller.close_current_world()
+
+    def _populate_recent_worlds(self) -> None:
+        """Populate the Recent Worlds submenu dynamically."""
+        self.recent_worlds_menu.clear()
+        try:
+            from ui.recent_worlds_manager import RecentWorldsManager
+            recent = RecentWorldsManager()
+            worlds = recent.list_worlds()
+            if not worlds:
+                action = self.recent_worlds_menu.addAction("(No recent worlds)")
+                action.setEnabled(False)
+                return
+            for entry in worlds[:10]:  # Show up to 10
+                name = entry.name
+                path = entry.path
+                if not os.path.isfile(path):
+                    name += " [MISSING]"
+                action = self.recent_worlds_menu.addAction(name)
+                action.setData(path)
+                action.triggered.connect(
+                    lambda checked, p=path: self._open_recent_world(p)
+                )
+        except Exception:
+            action = self.recent_worlds_menu.addAction("(Error loading)")
+            action.setEnabled(False)
+
+    def _open_recent_world(self, path: str) -> None:
+        """Open a world from the Recent Worlds submenu."""
+        if self.article_view.is_dirty:
+            result = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Save before switching?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self.article_view.save()
+            elif result == QMessageBox.StandardButton.Cancel:
+                return
+        if self._controller:
+            self._controller.open_world(path)
 
     def _on_delete_article(self) -> None:
         """Delete the currently displayed article."""

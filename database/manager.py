@@ -102,12 +102,13 @@ class DatabaseManager:
         return self._conn
 
     def close(self) -> None:
-        """Close the database connection cleanly."""
+        """Close the database connection cleanly and clear state."""
         with self._conn_lock:
             if self._conn is not None:
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                 self._conn.close()
                 self._conn = None
+                self._db_path = None
 
     # ------------------------------------------------------------------
     # Convenience methods

@@ -3,13 +3,12 @@
 World Garden — Application Entry Point.
 
 Launches the desktop application shell with:
-- Database initialisation
+- ApplicationController for startup flow (World Manager or CLI path)
 - Theme management (light/dark)
-- Main window with sidebar, article view, and toolbar
 
 Usage:
-    python main.py                    # Opens default database
-    python main.py path/to/lore.db    # Opens specific database
+    python main.py                          # Shows World Manager
+    python main.py path/to/world.wgdb       # Opens that world directly
 """
 
 import sys
@@ -26,9 +25,15 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from database.manager import DatabaseManager
-from ui.default_templates import ensure_default_templates
-from ui.main_window import MainWindow
+from ui.app_controller import ApplicationController
+from ui.recent_worlds_manager import RecentWorldsManager, RECENT_WORLDS_PATH
 from ui.theme import ThemeManager
+
+
+LEGACY_IGNORE_FLAG = os.path.join(
+    os.path.join(str(Path.home()), ".worldgarden"),
+    ".legacy_ignore_done",
+)
 
 
 def main() -> None:
@@ -46,49 +51,86 @@ def main() -> None:
     theme = ThemeManager(app)
     theme.switch_to(ThemeManager.LIGHT)
 
-    db_path = _resolve_db_path(sys.argv[1] if len(sys.argv) > 1 else None)
-    try:
-        DatabaseManager().open(db_path)
-    except Exception as e:
-        QMessageBox.warning(
-            None,
-            "Database",
-            f"Could not open database at:\n{db_path}\n\n{e}\n\n"
-            "Falling back to in-memory database. "
-            "Use File → Open Database to open an existing file.",
-        )
-        # Fall back to in-memory so the app doesn't crash on startup
-        DatabaseManager().open(":memory:")
+    # Handle legacy lorekeeper.db on first run
+    _handle_legacy_db()
 
-    # Build and show the main window — it will query the DB for sidebar counts,
-    # travel map data, etc. so the DB _must_ be open before this point.
-    window = MainWindow(theme)
-    window.show()
-
-    # Attach the manager to the window for status bar and other internals
-    window._db = DatabaseManager()
-    window._update_db_status()
-    window.refresh_ui()
-
-    # Seed default templates into the database
-    try:
-        ensure_default_templates()
-    except Exception:
-        pass  # Already seeded or DB not ready
+    # Create the application controller and start the flow
+    controller = ApplicationController(app, theme)
+    controller.start()
 
     sys.exit(app.exec())
 
 
-def _resolve_db_path(cli_path: str | None) -> str:
-    """Return the path to the database file to use.
+def _handle_legacy_db() -> None:
+    """Check for legacy ~/.lorekeeper/lorekeeper.db on first run.
 
-    1. CLI argument (if provided)
-    2. Default: ~/.lorekeeper/lorekeeper.db
+    Shows a dialog offering to: Add to Recent, Rename and Move, or Ignore.
+    Remembers the Ignore choice so the prompt doesn't repeat.
     """
-    from database.manager import DatabaseManager
-    if cli_path:
-        return str(Path(cli_path).resolve())
-    return DatabaseManager.default_db_path()
+    legacy_path = os.path.join(str(Path.home()), ".lorekeeper", "lorekeeper.db")
+    if not os.path.isfile(legacy_path):
+        return
+
+    # Check if we've already asked about this
+    if os.path.isfile(LEGACY_IGNORE_FLAG):
+        return
+
+    # Check if it's already in recent worlds
+    recent = RecentWorldsManager()
+    if recent.contains_path(legacy_path):
+        return
+
+    # Show dialog (using QMessageBox since no window exists yet)
+    msg = QMessageBox()
+    msg.setWindowTitle("Legacy World Found")
+    msg.setText(
+        "A world from a previous version of World Garden (LoreKeeper) was found."
+    )
+    msg.setInformativeText(
+        f"Location:\n{legacy_path}\n\n"
+        "What would you like to do with it?"
+    )
+
+    add_btn = msg.addButton("Add to Recent Worlds", QMessageBox.ButtonRole.ActionRole)
+    move_btn = msg.addButton("Rename and Move...", QMessageBox.ButtonRole.ActionRole)
+    ignore_btn = msg.addButton("Ignore", QMessageBox.ButtonRole.RejectRole)
+    msg.setDefaultButton(add_btn)
+    msg.exec()
+
+    clicked = msg.clickedButton()
+
+    if clicked == add_btn:
+        name = Path(legacy_path).stem
+        recent.add_world(name, legacy_path)
+
+    elif clicked == move_btn:
+        # Ask for new name and location
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(
+            None,
+            "Rename Legacy World",
+            "Enter a name for this world:",
+            text="My World",
+        )
+        if ok and new_name.strip():
+            new_name = new_name.strip()
+            data_dir = os.path.join(str(Path.home()), ".worldgarden", "Worlds")
+            Path(data_dir).mkdir(parents=True, exist_ok=True)
+            new_path = os.path.join(data_dir, f"{new_name}.wgdb")
+            try:
+                os.rename(legacy_path, new_path)
+                recent.add_world(new_name, new_path)
+            except Exception as e:
+                QMessageBox.warning(
+                    None, "Error", f"Could not move file:\n{e}"
+                )
+                # Still add the old location
+                recent.add_world(new_name, legacy_path)
+
+    elif clicked == ignore_btn:
+        # Create flag file so we don't ask again
+        Path(LEGACY_IGNORE_FLAG).parent.mkdir(parents=True, exist_ok=True)
+        Path(LEGACY_IGNORE_FLAG).touch()
 
 
 if __name__ == "__main__":
