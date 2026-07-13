@@ -31,6 +31,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QCursor,
+    QGuiApplication,
     QEnterEvent,
     QFont,
     QMouseEvent,
@@ -183,11 +184,24 @@ class HoverPreviewWidget(QFrame):
         self._article = article
         self._template = crud.get_template_by_type_name(article.article_type)
 
+        # Stop any previous animation/content before repopulating the shared widget.
+        self._stop_fade()
+        self.hide()
         self._populate(article)
-        self._position_near(global_pos)
 
-        # Ensure valid geometry before showing to prevent Qt geometry warnings
+        # Let Qt calculate the final layout before choosing a screen position.
+        # Positioning first can make Windows reject the requested geometry once
+        # word-wrapped labels expand the tooltip.
+        if self.layout():
+            self.layout().activate()
+        self._container.adjustSize()
         self.adjustSize()
+
+        wanted_height = max(self.minimumSizeHint().height(), self.sizeHint().height())
+        wanted_height = min(wanted_height, self.PREVIEW_MAX_HEIGHT)
+        self.resize(self.PREVIEW_WIDTH, wanted_height)
+
+        self._position_near(global_pos)
         self._fade_in()
 
     def _populate(self, article: Article) -> None:
@@ -279,27 +293,27 @@ class HoverPreviewWidget(QFrame):
     # ----------------------------------------------------------------
 
     def _position_near(self, global_pos: tuple[int, int]) -> None:
-        """Position the tooltip near the cursor, avoiding screen edges."""
-        x, y = global_pos
-        screen = self.screen()
+        """Position the finalized tooltip near the cursor and inside its screen."""
+        cursor_x, cursor_y = global_pos
+        width = self.width()
+        height = self.height()
+
+        screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen()
         if screen:
-            screen_geom = screen.geometry()
-            # Offset below and to the right of cursor
-            x += 16
-            y += 16
-            # Don't go off screen
-            if x + self.PREVIEW_WIDTH > screen_geom.right():
-                x = global_pos[0] - self.PREVIEW_WIDTH - 8
-            if y + self.PREVIEW_MAX_HEIGHT > screen_geom.bottom():
-                y = global_pos[1] - self.PREVIEW_MAX_HEIGHT - 8
-            if x < screen_geom.left():
-                x = screen_geom.left() + 4
-            if y < screen_geom.top():
-                y = screen_geom.top() + 4
+            screen_geom = screen.availableGeometry()
+            x = cursor_x + 16
+            y = cursor_y + 16
+
+            if x + width > screen_geom.right() + 1:
+                x = cursor_x - width - 8
+            if y + height > screen_geom.bottom() + 1:
+                y = cursor_y - height - 8
+
+            x = max(screen_geom.left() + 4, min(x, screen_geom.right() - width - 3))
+            y = max(screen_geom.top() + 4, min(y, screen_geom.bottom() - height - 3))
         else:
-            # Fallback: clamp to reasonable screen bounds
-            x = max(0, min(x, 1920 - self.PREVIEW_WIDTH))
-            y = max(0, min(y, 1080 - self.PREVIEW_MAX_HEIGHT))
+            x = max(0, cursor_x + 16)
+            y = max(0, cursor_y + 16)
 
         self.move(x, y)
 
@@ -340,16 +354,24 @@ class HoverPreviewWidget(QFrame):
 
     @staticmethod
     def _clear_layout(layout) -> None:
+        """Remove old preview rows immediately before inserting new content."""
         while layout.count():
             item = layout.takeAt(0)
-            if item:
-                if item.layout():
-                    while item.layout().count():
-                        child = item.layout().takeAt(0)
-                        if child and child.widget():
-                            child.widget().deleteLater()
-                if item.widget():
-                    item.widget().deleteLater()
+            if not item:
+                continue
+
+            child_layout = item.layout()
+            if child_layout:
+                HoverPreviewWidget._clear_layout(child_layout)
+
+            widget = item.widget()
+            if widget:
+                # deleteLater alone leaves the old widget painted until the next
+                # event-loop pass. Detaching and hiding it prevents stale preview
+                # fields from flashing in the reused tooltip.
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
 
     @staticmethod
     def _type_icon(article_type: str) -> str:

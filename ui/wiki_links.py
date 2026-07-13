@@ -138,12 +138,28 @@ def render_wiki_content(markdown_text: str) -> str:
 
     html = WIKI_LINK_PATTERN.sub(_replace_wiki_link, html)
 
-    # Line breaks (preserve double line breaks as paragraph breaks)
-    html = re.sub(r'\n\s*\n', '</p><p>', html)
-    html = re.sub(r'\n(?!\s*</)', '<br>', html)
+    # Normalize pasted Windows/Mac line endings
+    html = html.replace("\r\n", "\n").replace("\r", "\n")
 
-    return f'<div style="line-height: 1.6;">{html}</div>'
+    # Avoid adding extra breaks directly after block elements
+    html = re.sub(r'(</h[1-4]>|<hr>)\n+', r'\1', html)
 
+    # Paragraphs
+    html = re.sub(r'\n[ \t]*\n+', '</p><p>', html)
+
+    # Single line breaks
+    html = html.replace('\n', '<br>')
+
+    html = f"<p>{html}</p>"
+
+    return (
+        '<div style="line-height:1.25;">'
+        '<style>'
+        'p{margin:0 0 0.35em 0;}'
+        '</style>'
+        f'{html}'
+        '</div>'
+    )
 
 def _escape_html(text: str) -> str:
     """Escape HTML special characters."""

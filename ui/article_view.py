@@ -597,27 +597,42 @@ class ArticleView(QFrame):
 
     def _content_key_press_with_autocomplete(self, event) -> None:
         """Handle key events while autocomplete is visible."""
-        from PySide6.QtGui import QKeyEvent
         from PySide6.QtCore import Qt
 
+        # If the autocomplete popup is not visible, use normal editor behavior.
+        if not self._link_autocomplete.isVisible():
+            self._content_key_press_default(event)
+            return
+
         key = event.key()
+
         if key == Qt.Key.Key_Down:
             self._link_autocomplete.select_next()
             event.accept()
+
         elif key == Qt.Key.Key_Up:
             self._link_autocomplete.select_prev()
             event.accept()
-        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab):
+
+        elif key in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Tab,
+        ):
             selected = self._link_autocomplete.get_selected_title()
+
             if selected:
                 self._insert_wiki_link(selected)
                 event.accept()
                 return
+
             self._dismiss_autocomplete()
             self._content_key_press_default(event)
+
         elif key == Qt.Key.Key_Escape:
             self._dismiss_autocomplete()
             event.accept()
+
         else:
             self._content_key_press_default(event)
 

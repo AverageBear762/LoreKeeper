@@ -1409,6 +1409,11 @@ class TravelMapWidget(QWidget):
             node_item = item
 
         if node_item and node_item != self._hovered_node:
+            # Cancel the previous target before scheduling the new one.
+            self._hover_timer.stop()
+            if self._hover_tooltip:
+                self._hover_tooltip._stop_fade()
+                self._hover_tooltip.hide()
             self._hovered_node = node_item
             self._hover_timer.start()
         elif not node_item:
