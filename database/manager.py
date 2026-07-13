@@ -58,7 +58,12 @@ class DatabaseManager:
             db_path: Filesystem path for the SQLite database file, or
                      ``":memory:"`` for an in-memory database.
             migrate: Run schema migrations on open (default True).
+
+        Safe to call multiple times — closes any existing connection first.
         """
+        # Close any existing connection before opening a new one
+        self.close()
+
         # Preserve the literal ":memory:" string — do NOT resolve it to a file.
         if isinstance(db_path, str) and db_path.strip() == ":memory:":
             resolved = ":memory:"

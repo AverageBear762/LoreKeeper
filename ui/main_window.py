@@ -84,7 +84,25 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         # -- File --
-        file_menu = menubar.addMenu("&File")
+        file_menu = menubar.addMenu("&World")
+
+        self.act_new_world = QAction("&Create New World...", self)
+        self.act_new_world.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        self.act_new_world.triggered.connect(self._on_create_new_world)
+        file_menu.addAction(self.act_new_world)
+
+        self.act_open_world = QAction("&Open World...", self)
+        self.act_open_world.setShortcut(QKeySequence("Ctrl+O"))
+        self.act_open_world.triggered.connect(self._on_open_world)
+        file_menu.addAction(self.act_open_world)
+
+        self.act_save_world_as = QAction("Save World &As...", self)
+        self.act_save_world_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.act_save_world_as.triggered.connect(self._on_save_world_as)
+        file_menu.addAction(self.act_save_world_as)
+
+        file_menu.addSeparator()
+
         self.act_new = QAction("&New Article", self)
         self.act_new.setShortcut(QKeySequence("Ctrl+N"))
         self.act_new.triggered.connect(self._on_new_article)
@@ -95,31 +113,9 @@ class MainWindow(QMainWindow):
         self.act_save.triggered.connect(self._on_save)
         file_menu.addAction(self.act_save)
 
-        self.act_save_as = QAction("Save &As...", self)
-        self.act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.act_save_as = QAction("Save Article &As...", self)
         self.act_save_as.triggered.connect(self._on_save_as)
         file_menu.addAction(self.act_save_as)
-
-        file_menu.addSeparator()
-
-        self.act_export_json = QAction("&Export JSON Snapshot...", self)
-        self.act_export_json.triggered.connect(self._on_export_json)
-        file_menu.addAction(self.act_export_json)
-
-        self.act_import_json = QAction("&Import JSON Snapshot...", self)
-        self.act_import_json.triggered.connect(self._on_import_json)
-        file_menu.addAction(self.act_import_json)
-
-        file_menu.addSeparator()
-
-        self.act_backup_db = QAction("&Backup Database...", self)
-        self.act_backup_db.triggered.connect(self._on_backup_db)
-        file_menu.addAction(self.act_backup_db)
-
-        self.act_open_db = QAction("&Open Database...", self)
-        self.act_open_db.setShortcut(QKeySequence("Ctrl+O"))
-        self.act_open_db.triggered.connect(self._on_open_database)
-        file_menu.addAction(self.act_open_db)
 
         file_menu.addSeparator()
 
@@ -152,6 +148,33 @@ class MainWindow(QMainWindow):
         self.act_delete.triggered.connect(self._on_delete_article)
         edit_menu.addAction(self.act_delete)
 
+        # -- Tools --
+        tools_menu = menubar.addMenu("&Tools")
+
+        self.act_export_json = QAction("&Export JSON Snapshot...", self)
+        self.act_export_json.triggered.connect(self._on_export_json)
+        tools_menu.addAction(self.act_export_json)
+
+        self.act_import_json = QAction("&Import JSON Snapshot...", self)
+        self.act_import_json.triggered.connect(self._on_import_json)
+        tools_menu.addAction(self.act_import_json)
+
+        tools_menu.addSeparator()
+
+        self.act_backup_db = QAction("&Backup Database...", self)
+        self.act_backup_db.triggered.connect(self._on_backup_db)
+        tools_menu.addAction(self.act_backup_db)
+
+        # -- Templates menu --
+        templates_menu = menubar.addMenu("&Templates")
+        self.act_manage_templates = QAction("&Manage Templates...", self)
+        self.act_manage_templates.triggered.connect(self._on_manage_templates)
+        templates_menu.addAction(self.act_manage_templates)
+        templates_menu.addSeparator()
+        self.act_seed_templates = QAction("&Restore Default Templates", self)
+        self.act_seed_templates.triggered.connect(self._on_seed_templates)
+        templates_menu.addAction(self.act_seed_templates)
+
         # -- View --
         view_menu = menubar.addMenu("&View")
         self.act_articles_view = QAction("&Articles", self)
@@ -173,18 +196,6 @@ class MainWindow(QMainWindow):
 
         # -- Help --
         help_menu = menubar.addMenu("&Help")
-
-        # -- Templates menu --
-        templates_menu = menubar.addMenu("&Templates")
-        self.act_manage_templates = QAction("&Manage Templates...", self)
-        self.act_manage_templates.triggered.connect(self._on_manage_templates)
-        templates_menu.addAction(self.act_manage_templates)
-        templates_menu.addSeparator()
-        self.act_seed_templates = QAction("&Restore Default Templates", self)
-        self.act_seed_templates.triggered.connect(self._on_seed_templates)
-        templates_menu.addAction(self.act_seed_templates)
-
-        # -- Help --
         self.act_about = QAction("&About World Garden", self)
         self.act_about.triggered.connect(self._on_about)
         help_menu.addAction(self.act_about)
@@ -329,8 +340,7 @@ class MainWindow(QMainWindow):
         db = DatabaseManager()
         db.open(db_path)
         self._db = db
-        self._update_db_status()
-        self.refresh_ui()
+        self._switch_world()
 
     def refresh_ui(self) -> None:
         """Refresh all sidebar lists and tree."""
@@ -412,11 +422,69 @@ class MainWindow(QMainWindow):
             except OSError as e:
                 QMessageBox.warning(self, "Export Error", str(e))
 
-    def _on_open_database(self) -> None:
-        """Open a different database file."""
+    def _on_create_new_world(self) -> None:
+        """Create a new empty world database."""
+        # Check for unsaved changes
+        if self.article_view.is_dirty:
+            result = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Save before switching?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self.article_view.save()
+            elif result == QMessageBox.StandardButton.Cancel:
+                return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Create New World",
+            str(Path.home()) + "/my_world.db",
+            "SQLite Database (*.db);;All Files (*)",
+        )
+        if not path:
+            return
+
+        path = str(Path(path).resolve())
+        # Ensure the file doesn't exist yet (or overwrite)
+        if Path(path).exists():
+            result = QMessageBox.question(
+                self, "Overwrite?",
+                f"File exists:\n{path}\n\nOverwrite?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            # Create a fresh database file
+            db = DatabaseManager()
+            db.open(path, migrate=True)
+            # Seed default templates into the fresh world
+            from ui.default_templates import ensure_default_templates
+            ensure_default_templates()
+            self._db = db
+            self._switch_world()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not create world:\n{e}")
+
+    def _on_open_world(self) -> None:
+        """Open an existing world database file."""
+        # Check for unsaved changes
+        if self.article_view.is_dirty:
+            result = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Save before switching?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self.article_view.save()
+            elif result == QMessageBox.StandardButton.Cancel:
+                return
+
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open World Garden Database",
+            "Open World",
             str(Path.home()),
             "SQLite Database (*.db *.sqlite);;All Files (*)",
         )
@@ -424,7 +492,33 @@ class MainWindow(QMainWindow):
             try:
                 self.open_database(path)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not open database:\n{e}")
+                QMessageBox.critical(self, "Error", f"Could not open world:\n{e}")
+
+    def _on_save_world_as(self) -> None:
+        """Save a copy of the current world database to a new file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save World As",
+            str(Path.home()) + "/world_backup.db",
+            "SQLite Database (*.db);;All Files (*)",
+        )
+        if path:
+            path = str(Path(path).resolve())
+            try:
+                DatabaseManager().backup_to(path)
+                self.status_label.setText(f"World saved to: {Path(path).name}")
+                self._update_db_status()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not save world:\n{e}")
+
+    def _switch_world(self) -> None:
+        """Refresh the entire UI after switching to a different world database."""
+        self.article_view.clear()
+        self.refresh_ui()
+        self._update_db_status()
+        self.status_label.setText("World loaded")
+        # Refresh travel map
+        self.travel_map.reload()
 
     def _on_delete_article(self) -> None:
         """Delete the currently displayed article."""
