@@ -318,8 +318,46 @@ class Sidebar(QFrame):
             self.recent_list.addItem(item)
 
     def refresh_category_tree(self) -> None:
-        """Rebuild the type/category tree."""
+        """Rebuild the category tree while preserving expanded branches."""
+        expanded_items = self._get_expanded_tree_items()
+
         self._populate_type_tree()
+
+        self._restore_expanded_tree_items(expanded_items)
+
+    def _get_expanded_tree_items(self) -> set[str]:
+        """Return the stable IDs/names of all currently expanded tree items."""
+        expanded_items: set[str] = set()
+
+        def inspect_item(item: QTreeWidgetItem) -> None:
+            item_key = item.data(0, Qt.ItemDataRole.UserRole)
+
+            if item.isExpanded() and item_key:
+                expanded_items.add(str(item_key))
+
+            for child_index in range(item.childCount()):
+                inspect_item(item.child(child_index))
+
+        for top_index in range(self.type_tree.topLevelItemCount()):
+            inspect_item(self.type_tree.topLevelItem(top_index))
+
+        return expanded_items
+
+    def _restore_expanded_tree_items(self, expanded_items: set[str]) -> None:
+        """Restore the previously expanded tree branches."""
+        def restore_item(item: QTreeWidgetItem) -> None:
+            item_key = item.data(0, Qt.ItemDataRole.UserRole)
+
+            if item_key and str(item_key) in expanded_items:
+                item.setExpanded(True)
+            else:
+                item.setExpanded(False)
+
+            for child_index in range(item.childCount()):
+                restore_item(item.child(child_index))
+
+        for top_index in range(self.type_tree.topLevelItemCount()):
+            restore_item(self.type_tree.topLevelItem(top_index))
 
     def set_search_text(self, text: str) -> None:
         """Programmatically set the search bar text."""

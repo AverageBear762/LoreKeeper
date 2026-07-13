@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -64,9 +65,9 @@ class MainWindow(QMainWindow):
 
         self._build_menu_bar()
         self._build_toolbar()
-        self._build_central()
         self._build_status_bar()
-
+        self._build_central()
+        
         # Keyboard shortcuts
         self._setup_shortcuts()
 
@@ -268,6 +269,11 @@ class MainWindow(QMainWindow):
         self.article_view = ArticleView()
         self.tab_widget.addTab(self.article_view, "📄 Articles")
 
+        self.article_view.article_updated.connect(
+            self._on_article_saved
+        )
+
+
         # Tab 1: Travel Map
         self.travel_map = TravelMapWidget()
         self.tab_widget.addTab(self.travel_map, "🗺 Travel Map")
@@ -291,7 +297,7 @@ class MainWindow(QMainWindow):
         # Travel map signals
         self.travel_map.article_navigated.connect(self._on_travel_map_navigate)
         self.travel_map.article_edit_requested.connect(self._on_travel_map_edit)
-
+        self.travel_map.article_created.connect(self._on_travel_map_article_created)
         # Wiki link signals from article view
         self.article_view.link_navigated.connect(self._on_article_link_navigated)
         self.article_view.link_creation_requested.connect(self._on_article_link_creation)
@@ -373,8 +379,15 @@ class MainWindow(QMainWindow):
         """Save the current article."""
         if self.article_view.save():
             self.status_label.setText("Article saved")
+
             self.sidebar.refresh_recent()
+            self.sidebar.refresh_favorites()
             self.sidebar.refresh_category_tree()
+
+            if self.article_view.current_article:
+                self.travel_map.refresh_article(
+                    self.article_view.current_article.id
+                )
         else:
             self.status_label.setText("Save failed")
 
@@ -457,6 +470,7 @@ class MainWindow(QMainWindow):
         self.sidebar.refresh_favorites()
         self.sidebar.refresh_recent()
         self.sidebar.refresh_category_tree()
+        self.travel_map.remove_article_from_map(article_id)
 
     def _on_toggle_theme(self) -> None:
         new_theme = self.theme.toggle()
@@ -502,6 +516,17 @@ class MainWindow(QMainWindow):
         """Open an article for editing from the travel map."""
         self._switch_to_article_view()
         self.article_view.load_article_by_id(article_id)
+
+    def _on_travel_map_article_created(self, article_id: str) -> None:
+        """Refresh the sidebar after an article is created from the map."""
+        article = crud.get_article(article_id)
+
+        self.sidebar.refresh_recent()
+        self.sidebar.refresh_favorites()
+        self.sidebar.refresh_category_tree()
+
+        if article:
+            self.status_label.setText(f"Created: {article.title}")
 
     def _on_manage_templates(self) -> None:
         """Open the template management dialog."""
@@ -637,9 +662,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _autosave(self) -> None:
-        """Autosave the current article if it has unsaved changes."""
         if self.article_view.is_dirty:
             self.article_view.save()
+
+    def _on_article_saved(self, article_id: str) -> None:
+        """Refresh dependent UI after any article save."""
+        self.sidebar.refresh_recent()
+        self.sidebar.refresh_favorites()
+        self.sidebar.refresh_category_tree()
+        self.travel_map.refresh_article(article_id)
 
     def _update_db_status(self) -> None:
         if self._db and self._db.db_path:

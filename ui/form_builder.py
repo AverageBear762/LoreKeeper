@@ -88,7 +88,7 @@ class FormFieldWidget(QWidget):
             w.setMaxLength(255)
             if isinstance(value, str):
                 w.setText(value)
-            w.textChanged.connect(self.value_changed.emit)
+            w.textChanged.connect(lambda _value: self.value_changed.emit)
             return w
 
         elif ft == "longtext":
@@ -110,7 +110,7 @@ class FormFieldWidget(QWidget):
                     w.setValue(int(value))
                 except (ValueError, TypeError):
                     pass
-            w.valueChanged.connect(self.value_changed.emit)
+            w.valueChanged.connect(lambda _value: self.value_changed.emit)
             return w
 
         elif ft == "boolean":
@@ -119,7 +119,7 @@ class FormFieldWidget(QWidget):
                 w.setChecked(value)
             elif isinstance(value, (int, float)):
                 w.setChecked(bool(value))
-            w.toggled.connect(self.value_changed.emit)
+            w.toggled.connect(lambda _value: self.value_changed.emit)
             return w
 
         elif ft == "date":
@@ -128,7 +128,7 @@ class FormFieldWidget(QWidget):
             w.setSpecialValueText("Not set")
             w.setDisplayFormat("yyyy-MM-dd")
             w.clear()
-            w.dateChanged.connect(self.value_changed.emit)
+            w.dateChanged.connect(lambda _value: self.value_changed.emit)
             return w
 
         elif ft == "select":
@@ -137,7 +137,7 @@ class FormFieldWidget(QWidget):
             w.addItems(defn.options or [])
             if isinstance(value, str) and value in (defn.options or []):
                 w.setCurrentText(value)
-            w.currentTextChanged.connect(self.value_changed.emit)
+            w.currentTextChanged.connect(lambda _value: self.value_changed.emit)
             return w
 
         elif ft == "image":

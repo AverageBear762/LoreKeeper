@@ -183,6 +183,8 @@ class BacklinksSection(QFrame):
 class ArticleView(QFrame):
     """Central widget for viewing/editing a wiki article."""
 
+    article_saved = Signal(str) # article_id
+
     content_changed = Signal()
     article_updated = Signal(str)  # article_id
     link_navigated = Signal(str)   # article_id

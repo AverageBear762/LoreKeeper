@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPainterPathStroker,
     QPen,
     QPixmap,
     QPolygonF,
@@ -75,6 +76,7 @@ from PySide6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
     QWidget,
+    QCheckBox
 )
 
 from database import crud
@@ -106,6 +108,7 @@ class MapNodeItem(QGraphicsEllipseItem):
         on_moved: Optional[callable] = None,
         on_clicked: Optional[callable] = None,
         on_double_clicked: Optional[callable] = None,
+        on_pressed: Optional[callable] = None,
         parent=None,
     ) -> None:
         super().__init__(
@@ -119,8 +122,10 @@ class MapNodeItem(QGraphicsEllipseItem):
         self._on_moved = on_moved
         self._on_clicked = on_clicked
         self._on_double_clicked = on_double_clicked
+        self._on_pressed = on_pressed
         self._drag_start_pos: Optional[QPointF] = None
         self._was_dragged = False
+        self._connection_press_consumed = False
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
@@ -178,11 +183,24 @@ class MapNodeItem(QGraphicsEllipseItem):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._on_pressed and self._on_pressed(self._node_data.id):
+                self._connection_press_consumed = True
+                self._drag_start_pos = None
+                self._was_dragged = False
+                event.accept()
+                return
+
+            self._connection_press_consumed = False
             self._drag_start_pos = event.scenePos()
             self._was_dragged = False
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._connection_press_consumed:
+            event.accept()
+            return
+
         if self._drag_start_pos:
             dist = (event.scenePos() - self._drag_start_pos).manhattanLength()
             if dist > 10:
@@ -191,13 +209,37 @@ class MapNodeItem(QGraphicsEllipseItem):
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if not self._was_dragged and self._on_clicked:
+            if self._connection_press_consumed:
+                self._connection_press_consumed = False
+                self._drag_start_pos = None
+                self._was_dragged = False
+                event.accept()
+                return
+
+            was_dragged = self._was_dragged
+
+            if not was_dragged and self._on_clicked:
                 self._on_clicked(self._node_data.id)
+
             self._drag_start_pos = None
             self._was_dragged = False
+
+            if was_dragged:
+                self.setSelected(False)
+                self._update_appearance()
+
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
+        scene = self.scene()
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and hasattr(scene, "connection_mode_active")
+            and scene.connection_mode_active
+        ):
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self._on_double_clicked:
             self._on_double_clicked(self._node_data.id)
         super().mouseDoubleClickEvent(event)
@@ -208,6 +250,9 @@ class MapNodeItem(QGraphicsEllipseItem):
                 self._node_data.x = self.pos().x()
                 self._node_data.y = self.pos().y()
                 self._on_moved(self._node_data.id, self.pos().x(), self.pos().y())
+        elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self._update_appearance()
+
         return super().itemChange(change, value)
 
     def paint(self, painter, option, widget=None) -> None:
@@ -389,10 +434,13 @@ class MapConnectionItem(QGraphicsLineItem):
         self._label.setBrush(QColor(100, 100, 100))
         super().hoverLeaveEvent(event)
 
-    def mousePressEvent(self, event) -> None:
+    def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._on_clicked:
             self._on_clicked(self._conn_data.id)
-        super().mousePressEvent(event)
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
 
     def paint(self, painter, option, widget=None) -> None:
         super().paint(painter, option, widget)
@@ -401,7 +449,7 @@ class MapConnectionItem(QGraphicsLineItem):
         if line.length() < 20:
             return
         mid = line.center()
-        angle = math.atan2(-line.dy(), line.dx())
+        angle = math.atan2(-line.dy(), line.dx()) + math.pi
         arrow_size = 8
         p1 = mid + QPointF(
             math.cos(angle + math.pi / 6) * arrow_size,
@@ -445,6 +493,9 @@ class MapScene(QGraphicsScene):
     node_moved = Signal(str, float, float)  # node_id, x, y
     connection_added = Signal(str)       # connection_id
     connection_selected = Signal(str)    # connection_id
+    connection_started = Signal(str)     # source node_id
+    connection_completed = Signal(bool, str)  # success, connection_id or ""
+    connection_cancelled = Signal()
 
     NODE_COLORS = {
         "Location": QColor(13, 110, 253),
@@ -465,8 +516,9 @@ class MapScene(QGraphicsScene):
         self._bg_image: Optional[QGraphicsPixmapItem] = None
         self._bg_pixmap: Optional[QPixmap] = None
         self._bg_path: Optional[str] = None
-        self._drawing_connection_nodes: list[MapNodeItem] = []
         self._temp_line: Optional[QGraphicsLineItem] = None
+        self._connection_start_id: Optional[str] = None
+        self._connection_mode_active = False
 
         self.setSceneRect(-2000, -2000, 4000, 4000)
 
@@ -527,6 +579,7 @@ class MapScene(QGraphicsScene):
             on_moved=self._on_node_moved,
             on_clicked=lambda nid: self.node_selected.emit(nid),
             on_double_clicked=lambda nid: self.node_double_clicked.emit(nid),
+            on_pressed=self.handle_node_press,
         )
         color = self.NODE_COLORS.get(article_type, MapNodeItem.DEFAULT_COLOR)
         item._base_color = color
@@ -663,54 +716,104 @@ class MapScene(QGraphicsScene):
     # Interaction helpers
     # ----------------------------------------------------------------
 
-    def start_drawing_connection(self, node: MapNodeItem) -> None:
-        """Begin drawing a connection from *node*."""
-        self._drawing_connection_nodes = [node]
-        pos = node.pos()
-        self._temp_line = QGraphicsLineItem(
-            QLineF(pos, pos + QPointF(1, 0))
-        )
+    def begin_connection_mode(self, source_node_id: Optional[str] = None) -> None:
+        """Enable connection mode, optionally starting from a source node."""
+        self.cancel_drawing_connection(emit_signal=False)
+        self._connection_mode_active = True
+
+        if source_node_id is not None:
+            self.start_drawing_connection(source_node_id)
+
+    def handle_node_press(self, node_id: str) -> bool:
+        """Consume a left-click when connection mode is active."""
+        if not self._connection_mode_active:
+            return False
+
+        if self._connection_start_id is None:
+            self.start_drawing_connection(node_id)
+            return True
+
+        success, connection_id = self.finish_drawing_connection(node_id)
+        self._connection_mode_active = False
+        self.connection_completed.emit(success, connection_id or "")
+        return True
+
+    def start_drawing_connection(self, node_id: str) -> bool:
+        """Begin drawing a temporary connection from a node ID."""
+        if node_id not in self._nodes:
+            return False
+
+        self._remove_temp_line()
+        self._connection_start_id = node_id
+
+        pos = self._nodes[node_id].pos()
+        self._temp_line = QGraphicsLineItem(QLineF(pos, pos))
+
         pen = QPen(QColor(108, 117, 125), 2, Qt.PenStyle.DashLine)
         pen.setCosmetic(True)
         self._temp_line.setPen(pen)
         self._temp_line.setZValue(20)
         self.addItem(self._temp_line)
+        self.connection_started.emit(node_id)
+        return True
 
     def update_drawing_connection(self, scene_pos: QPointF) -> None:
-        """Update the temporary line endpoint as the mouse moves."""
-        if self._temp_line and self._drawing_connection_nodes:
-            p1 = self._drawing_connection_nodes[0].pos()
-            self._temp_line.setLine(QLineF(p1, scene_pos))
+        """Update the temporary connection line endpoint."""
+        if self._temp_line is None or self._connection_start_id is None:
+            return
 
-    def finish_drawing_connection(self, target_node: MapNodeItem) -> bool:
-        """Finish drawing — create connection if valid."""
-        if not self._drawing_connection_nodes:
-            return False
+        node = self._nodes.get(self._connection_start_id)
+        if node is None:
+            self.cancel_drawing_connection()
+            return
 
-        source = self._drawing_connection_nodes[0]
-        # Clean up temp line
-        if self._temp_line:
-            self.removeItem(self._temp_line)
+        try:
+            self._temp_line.setLine(QLineF(node.pos(), scene_pos))
+        except RuntimeError:
             self._temp_line = None
 
-        self._drawing_connection_nodes = []
+    def finish_drawing_connection(self, target_node_id: str) -> tuple[bool, Optional[str]]:
+        """Create the connection and clear the temporary drawing state."""
+        source_id = self._connection_start_id
+        self._remove_temp_line()
+        self._connection_start_id = None
 
-        if source.node_id == target_node.node_id:
-            return False  # Can't connect to self
+        if source_id is None or target_node_id not in self._nodes:
+            return False, None
+        if source_id == target_node_id:
+            return False, None
 
-        item = self.create_new_connection(source.node_id, target_node.node_id)
-        return item is not None
+        item = self.create_new_connection(source_id, target_node_id)
+        if item is None:
+            return False, None
+        return True, item.connection_id
 
-    def cancel_drawing_connection(self) -> None:
-        """Cancel an in-progress connection draw."""
-        if self._temp_line:
-            self.removeItem(self._temp_line)
-            self._temp_line = None
-        self._drawing_connection_nodes = []
+    def _remove_temp_line(self) -> None:
+        if self._temp_line is None:
+            return
+        try:
+            if self._temp_line.scene() is self:
+                self.removeItem(self._temp_line)
+        except RuntimeError:
+            pass
+        self._temp_line = None
+
+    def cancel_drawing_connection(self, emit_signal: bool = True) -> None:
+        """Cancel connection mode and clear all temporary state."""
+        was_active = self._connection_mode_active or self._connection_start_id is not None
+        self._remove_temp_line()
+        self._connection_start_id = None
+        self._connection_mode_active = False
+        if emit_signal and was_active:
+            self.connection_cancelled.emit()
+
+    @property
+    def connection_mode_active(self) -> bool:
+        return self._connection_mode_active
 
     @property
     def is_drawing_connection(self) -> bool:
-        return bool(self._drawing_connection_nodes)
+        return self._connection_start_id is not None
 
 
 # ======================================================================
@@ -722,6 +825,7 @@ class TravelMapWidget(QWidget):
 
     article_navigated = Signal(str)        # article_id
     article_edit_requested = Signal(str)   # article_id
+    article_created = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -735,6 +839,8 @@ class TravelMapWidget(QWidget):
 
         self._build_ui()
         self._load_from_db()
+
+        QTimer.singleShot(0, self._focus_on_nodes)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -804,7 +910,7 @@ class TravelMapWidget(QWidget):
         self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._view.setViewportUpdateMode(
-            QGraphicsView.ViewportUpdateMode.SmartViewportUpdate
+            QGraphicsView.ViewportUpdateMode.FullViewportUpdate
         )
         self._view.setMouseTracking(True)
         self._view.setMinimumSize(400, 300)
@@ -825,6 +931,9 @@ class TravelMapWidget(QWidget):
         self._scene.node_selected.connect(self._on_node_selected)
         self._scene.node_double_clicked.connect(self._on_node_double_clicked)
         self._scene.connection_selected.connect(self._on_connection_selected)
+        self._scene.connection_started.connect(self._on_connection_started)
+        self._scene.connection_completed.connect(self._on_connection_completed)
+        self._scene.connection_cancelled.connect(self._on_connection_cancelled)
 
     # ----------------------------------------------------------------
     # Loading from DB
@@ -861,6 +970,36 @@ class TravelMapWidget(QWidget):
         for node_item in self._scene.get_all_nodes():
             crud.update_map_node(node_item.map_node)
 
+    def refresh_article(self, article_id: str) -> None:
+        """Refresh the title/type of a single map node."""
+        node = self._scene.find_node_by_article(article_id)
+
+        if not node:
+            return
+
+        article = crud.get_article(article_id)
+        if not article:
+            return
+
+        node.set_title(article.title)
+        node._article_type = article.article_type
+        node._base_color = self._scene.NODE_COLORS.get(
+            article.article_type,
+            MapNodeItem.DEFAULT_COLOR,
+        )
+
+        node._update_appearance()
+        node.update()
+
+    def remove_article_from_map(self, article_id: str) -> bool:
+        """Immediately remove a deleted article's node from the visible map."""
+        node_item = self._scene.find_node_by_article(article_id)
+
+        if not node_item:
+            return False
+
+        return self._scene.remove_node(node_item.node_id)
+
     # ----------------------------------------------------------------
     # View controls
     # ----------------------------------------------------------------
@@ -873,8 +1012,32 @@ class TravelMapWidget(QWidget):
 
     def _fit_all(self) -> None:
         self._view.fitInView(
-            self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
+            self._scene.sceneRect(), 
+            Qt.AspectRatioMode.KeepAspectRatio
         )
+    def _focus_on_nodes(self) -> None:
+        """Center and zoom the view around all map nodes."""
+        nodes = self._scene.get_all_nodes()
+
+        if not nodes:
+            self._view.centerOn(0, 0)
+            return
+
+        nodes_rect = QRectF()
+
+        for node in nodes:
+            node_rect = node.sceneBoundingRect()
+
+            if nodes_rect.isNull():
+                nodes_rect = node_rect
+            else:
+             nodes_rect = nodes_rect.united(node_rect)
+
+        # Add some padding
+        padding = 100
+        nodes_rect.adjust(-padding, -padding, padding, padding)
+
+        self._view.centerOn(nodes_rect.center())
 
     # ----------------------------------------------------------------
     # Background
@@ -893,18 +1056,38 @@ class TravelMapWidget(QWidget):
     # ----------------------------------------------------------------
 
     def _on_toggle_connect_mode(self, checked: bool) -> None:
-        """Toggle connection-drawing mode on/off."""
+        """Toggle toolbar-driven connection mode."""
         if checked:
             self.act_connect.setText("🔗 Connecting...")
             self._connect_status.setText("Click a node to start")
             self._view.setCursor(Qt.CursorShape.CrossCursor)
             self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self._scene.begin_connection_mode()
         else:
-            self.act_connect.setText("🔗 Connect")
-            self._connect_status.setText("")
-            self._view.setCursor(Qt.CursorShape.ArrowCursor)
-            self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self._scene.cancel_drawing_connection()
+            self._reset_connection_ui()
+
+    def _on_connection_started(self, node_id: str) -> None:
+        self._connect_status.setText("Select a second node")
+
+    def _on_connection_completed(self, success: bool, connection_id: str) -> None:
+        self._reset_connection_ui()
+        if not success:
+            self._connect_status.setText("Already connected or invalid")
+            QTimer.singleShot(1500, lambda: self._connect_status.setText(""))
+
+    def _on_connection_cancelled(self) -> None:
+        self._reset_connection_ui()
+
+    def _reset_connection_ui(self) -> None:
+        self.act_connect.blockSignals(True)
+        self.act_connect.setChecked(False)
+        self.act_connect.setText("🔗 Connect")
+        self.act_connect.blockSignals(False)
+        self._connect_status.setText("")
+        self._view.setCursor(Qt.CursorShape.ArrowCursor)
+        self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self._view.viewport().releaseMouse()
 
     def _on_search_changed(self, text: str) -> None:
         """Filter visible nodes based on search text."""
@@ -1010,9 +1193,17 @@ class TravelMapWidget(QWidget):
             crud.update_map_connection(conn_data)
             if conn_data.id in self._scene._connections:
                 conn_item = self._scene._connections[conn_data.id]
+
+                conn_item._label.setText(conn_item._build_label_text())
                 conn_item._update_pen()
                 conn_item._update_position()
                 conn_item._update_label_visibility()
+
+        # Reset any lingering QGraphicsView drag state after the modal dialog.
+        self._view.viewport().releaseMouse()
+        self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self._view.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _delete_connection(self, connection_id: str, dialog: QDialog) -> None:
         self._scene.remove_connection(connection_id)
@@ -1061,7 +1252,14 @@ class TravelMapWidget(QWidget):
             node.toggle_label()
             crud.update_map_node(node.map_node)
         elif action == act_connect:
-            self._scene.start_drawing_connection(node)
+            self.act_connect.blockSignals(True)
+            self.act_connect.setChecked(True)
+            self.act_connect.setText("🔗 Connecting...")
+            self.act_connect.blockSignals(False)
+            self._connect_status.setText("Select target node")
+            self._view.setCursor(Qt.CursorShape.CrossCursor)
+            self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self._scene.begin_connection_mode(node.node_id)
         elif action == act_create_link:
             self._create_article_at_node(node, scene_pos)
         elif action == act_delete:
@@ -1102,7 +1300,15 @@ class TravelMapWidget(QWidget):
             atype = combo.currentText()
             article = Article(title=title, content="", article_type=atype)
             crud.create_article(article)
-            self._scene.create_new_node(article.id, title, atype, pos.x(), pos.y())
+            self._scene.create_new_node(
+                article.id, 
+                title, 
+                atype, 
+                pos.x(), 
+                pos.y()
+                )
+
+            self.article_created.emit(article.id)
 
     def _show_connection_context_menu(self, conn: MapConnectionItem) -> None:
         from PySide6.QtWidgets import QMenu
@@ -1187,10 +1393,6 @@ class TravelMapWidget(QWidget):
                 if self._scene.is_drawing_connection:
                     scene_pos = self._view.mapToScene(event.position().toPoint())
                     self._scene.update_drawing_connection(scene_pos)
-            elif event.type() == event.Type.MouseButtonPress:
-                if self.act_connect.isChecked() or self._scene.is_drawing_connection:
-                    self._on_connect_click(event)
-                    return True
             elif event.type() == event.Type.Leave:
                 self._hide_tooltip()
         return super().eventFilter(obj, event)
@@ -1212,39 +1414,6 @@ class TravelMapWidget(QWidget):
         elif not node_item:
             self._hide_tooltip()
             self._hovered_node = None
-
-    def _on_connect_click(self, event) -> None:
-        """Handle mouse clicks in connection-drawing mode."""
-        scene_pos = self._view.mapToScene(event.position().toPoint())
-        item = self._scene.itemAt(scene_pos, self._view.transform())
-
-        # Find the MapNodeItem that was clicked
-        node_item = None
-        while item and not isinstance(item, MapNodeItem):
-            item = item.parentItem()
-        if isinstance(item, MapNodeItem):
-            node_item = item
-
-        if node_item:
-            if not self._scene.is_drawing_connection:
-                # First click — start drawing from this node
-                self._scene.start_drawing_connection(node_item)
-                self._connect_status.setText("Now click another node to connect")
-                self.act_connect.setChecked(True)
-            else:
-                # Second click — finish connection
-                if self._scene.finish_drawing_connection(node_item):
-                    self._connect_status.setText("Connection created!")
-                    self.act_connect.setChecked(False)
-                    self._on_toggle_connect_mode(False)
-                else:
-                    self._connect_status.setText("Already connected or invalid")
-        else:
-            # Clicked empty space — cancel
-            self._scene.cancel_drawing_connection()
-            self._connect_status.setText("")
-            self.act_connect.setChecked(False)
-            self._on_toggle_connect_mode(False)
 
     def _on_hover_timeout(self) -> None:
         """Show the hover tooltip for the currently hovered node."""
@@ -1275,7 +1444,7 @@ class TravelMapWidget(QWidget):
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            if self._scene.is_drawing_connection:
+            if self._scene.connection_mode_active:
                 self._scene.cancel_drawing_connection()
             else:
                 self.node_search.clearFocus()

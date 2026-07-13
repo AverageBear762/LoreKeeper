@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QTextBrowser
 
@@ -182,8 +182,8 @@ def _escape_html_basic(text: str) -> str:
 class WikiTextBrowser(QTextBrowser):
     """QTextBrowser subclass that renders wiki content and handles link clicks."""
 
-    link_navigated = str  # signal: article_id or article_name
-    link_creation_requested = str  # signal: article_name to create
+    link_navigated = Signal(str)  # signal: article_id or article_name
+    link_creation_requested = Signal(str)  # signal: article_name to create
 
     def __init__(self, parent=None):
         super().__init__(parent)
