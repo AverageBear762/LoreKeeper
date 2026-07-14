@@ -15,7 +15,7 @@ from typing import Any
 # Schema version tracking
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 3  # bump when adding new migrations
+SCHEMA_VERSION = 4  # bump when adding new migrations
 
 CREATE_SCHEMA_VERSION = """
 CREATE TABLE IF NOT EXISTS _schema_version (
@@ -83,8 +83,70 @@ CREATE TABLE IF NOT EXISTS map_connections (
 """
 
 # ---------------------------------------------------------------------------
-# FTS5 virtual table (full-text search)
+# Calendar tables
 # ---------------------------------------------------------------------------
+
+CREATE_CALENDARS = """
+CREATE TABLE IF NOT EXISTS calendars (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    epoch       TEXT NOT NULL DEFAULT '',
+    days_in_week INTEGER NOT NULL DEFAULT 7,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+"""
+
+CREATE_MONTHS = """
+CREATE TABLE IF NOT EXISTS calendar_months (
+    id          TEXT PRIMARY KEY,
+    calendar_id TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    days        INTEGER NOT NULL DEFAULT 30,
+    position    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
+);
+"""
+
+CREATE_WEEKDAYS = """
+CREATE TABLE IF NOT EXISTS calendar_weekdays (
+    id          TEXT PRIMARY KEY,
+    calendar_id TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    position    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
+);
+"""
+
+CREATE_ERAS = """
+CREATE TABLE IF NOT EXISTS calendar_eras (
+    id          TEXT PRIMARY KEY,
+    calendar_id TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    abbreviation TEXT NOT NULL DEFAULT '',
+    start_year  INTEGER NOT NULL DEFAULT 1,
+    is_primary  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
+);
+"""
+
+CREATE_LEAP_YEAR_RULES = """
+CREATE TABLE IF NOT EXISTS calendar_leap_year_rules (
+    id          TEXT PRIMARY KEY,
+    calendar_id TEXT NOT NULL,
+    rule_type   TEXT NOT NULL DEFAULT 'interval',
+    interval    INTEGER NOT NULL DEFAULT 4,
+    offset      INTEGER NOT NULL DEFAULT 0,
+    month       INTEGER NOT NULL DEFAULT 2,
+    days_to_add INTEGER NOT NULL DEFAULT 1,
+    description TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
+);
+"""
 
 CREATE_ARTICLES_FTS = """
 CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
@@ -158,6 +220,11 @@ def create_all_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(CREATE_ARTICLE_TEMPLATES)
     conn.executescript(CREATE_MAP_NODES)
     conn.executescript(CREATE_MAP_CONNECTIONS)
+    conn.executescript(CREATE_CALENDARS)
+    conn.executescript(CREATE_MONTHS)
+    conn.executescript(CREATE_WEEKDAYS)
+    conn.executescript(CREATE_ERAS)
+    conn.executescript(CREATE_LEAP_YEAR_RULES)
 
     # FTS table
     conn.execute(CREATE_ARTICLES_FTS)
@@ -210,12 +277,14 @@ def migrate(conn: sqlite3.Connection) -> None:
         _migrate_v3(conn)
         set_schema_version(conn, 3)
 
+    # v4: Add calendar tables
+    if current < 4:
+        _migrate_v4(conn)
+        set_schema_version(conn, 4)
+
     # Future migrations go here:
-    # if current < 2:
-    #     _migrate_v2(conn)
-    #     set_schema_version(conn, 2)
-    # if current < 3:
-    #     ...
+    # if current < 5:
+    #     _migrate_v5(conn)
 
     # If we already match, ensure at least all tables exist
     if current >= SCHEMA_VERSION:
@@ -255,3 +324,16 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
         conn.commit()
     except sqlite3.OperationalError:
         pass  # Column already exists
+
+
+# ---------------------------------------------------------------------------
+# Migration: v4 — calendar tables
+# ---------------------------------------------------------------------------
+def _migrate_v4(conn: sqlite3.Connection) -> None:
+    """Add calendar tables (calendars, months, weekdays, eras, leap year rules)."""
+    conn.executescript(CREATE_CALENDARS)
+    conn.executescript(CREATE_MONTHS)
+    conn.executescript(CREATE_WEEKDAYS)
+    conn.executescript(CREATE_ERAS)
+    conn.executescript(CREATE_LEAP_YEAR_RULES)
+    conn.commit()

@@ -16,6 +16,11 @@ from database.manager import DatabaseManager
 from database.models import (
     Article,
     ArticleTemplate,
+    Calendar,
+    CalendarEra,
+    CalendarMonth,
+    CalendarWeekday,
+    LeapYearRule,
     MapConnection,
     MapNode,
     _now,
@@ -442,3 +447,200 @@ def list_all_connections() -> list[MapConnection]:
 def get_full_map_data() -> tuple[list[MapNode], list[MapConnection]]:
     """Return (nodes, connections) for the full travel map."""
     return list_all_map_nodes(), list_all_connections()
+
+
+# ======================================================================
+#  CALENDARS
+# ======================================================================
+
+def create_calendar(cal: Calendar) -> Calendar:
+    """Insert a new calendar definition."""
+    DatabaseManager().execute(
+        """
+        INSERT INTO calendars (id, name, description, epoch,
+                               days_in_week, created_at, updated_at)
+        VALUES (:id, :name, :description, :epoch,
+                :days_in_week, :created_at, :updated_at)
+        """,
+        cal.to_row(),
+    )
+    return cal
+
+
+def get_calendar(calendar_id: str) -> Optional[Calendar]:
+    """Fetch a calendar by id."""
+    row = DatabaseManager().fetchone(
+        "SELECT * FROM calendars WHERE id = ?", (calendar_id,)
+    )
+    return Calendar.from_row(dict(row)) if row else None
+
+
+def get_calendar_by_name(name: str) -> Optional[Calendar]:
+    """Fetch a calendar by name."""
+    row = DatabaseManager().fetchone(
+        "SELECT * FROM calendars WHERE name = ?", (name,)
+    )
+    return Calendar.from_row(dict(row)) if row else None
+
+
+def update_calendar(cal: Calendar) -> Calendar:
+    """Update an existing calendar."""
+    from datetime import datetime
+    cal.updated_at = datetime.utcnow().isoformat()
+    DatabaseManager().execute(
+        """
+        UPDATE calendars SET
+            name = :name, description = :description, epoch = :epoch,
+            days_in_week = :days_in_week, updated_at = :updated_at
+        WHERE id = :id
+        """,
+        cal.to_row(),
+    )
+    return cal
+
+
+def delete_calendar(calendar_id: str) -> bool:
+    """Delete a calendar and all its data (cascades)."""
+    cur = DatabaseManager().execute(
+        "DELETE FROM calendars WHERE id = ?", (calendar_id,)
+    )
+    return cur.rowcount > 0
+
+
+def list_calendars() -> list[Calendar]:
+    """Return all calendars."""
+    rows = DatabaseManager().fetchall("SELECT * FROM calendars ORDER BY name")
+    return [Calendar.from_row(dict(r)) for r in rows]
+
+
+# ------------------------------------------------------------------
+# Calendar months
+# ------------------------------------------------------------------
+
+def create_calendar_month(month: CalendarMonth) -> CalendarMonth:
+    """Insert a new calendar month."""
+    DatabaseManager().execute(
+        """
+        INSERT INTO calendar_months (id, calendar_id, name, days, position, created_at)
+        VALUES (:id, :calendar_id, :name, :days, :position, :created_at)
+        """,
+        month.to_row(),
+    )
+    return month
+
+
+def list_calendar_months(calendar_id: str) -> list[CalendarMonth]:
+    """Return all months for a calendar, ordered by position."""
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM calendar_months WHERE calendar_id = ? ORDER BY position",
+        (calendar_id,),
+    )
+    return [CalendarMonth.from_row(dict(r)) for r in rows]
+
+
+def delete_calendar_months(calendar_id: str) -> None:
+    """Delete all months for a calendar."""
+    DatabaseManager().execute(
+        "DELETE FROM calendar_months WHERE calendar_id = ?", (calendar_id,)
+    )
+
+
+# ------------------------------------------------------------------
+# Calendar weekdays
+# ------------------------------------------------------------------
+
+def create_calendar_weekday(wd: CalendarWeekday) -> CalendarWeekday:
+    """Insert a new calendar weekday."""
+    DatabaseManager().execute(
+        """
+        INSERT INTO calendar_weekdays (id, calendar_id, name, position, created_at)
+        VALUES (:id, :calendar_id, :name, :position, :created_at)
+        """,
+        wd.to_row(),
+    )
+    return wd
+
+
+def list_calendar_weekdays(calendar_id: str) -> list[CalendarWeekday]:
+    """Return all weekdays for a calendar, ordered by position."""
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM calendar_weekdays WHERE calendar_id = ? ORDER BY position",
+        (calendar_id,),
+    )
+    return [CalendarWeekday.from_row(dict(r)) for r in rows]
+
+
+def delete_calendar_weekdays(calendar_id: str) -> None:
+    """Delete all weekdays for a calendar."""
+    DatabaseManager().execute(
+        "DELETE FROM calendar_weekdays WHERE calendar_id = ?", (calendar_id,)
+    )
+
+
+# ------------------------------------------------------------------
+# Calendar eras
+# ------------------------------------------------------------------
+
+def create_calendar_era(era: CalendarEra) -> CalendarEra:
+    """Insert a new calendar era."""
+    DatabaseManager().execute(
+        """
+        INSERT INTO calendar_eras (id, calendar_id, name, abbreviation,
+                                   start_year, is_primary, created_at)
+        VALUES (:id, :calendar_id, :name, :abbreviation,
+                :start_year, :is_primary, :created_at)
+        """,
+        era.to_row(),
+    )
+    return era
+
+
+def list_calendar_eras(calendar_id: str) -> list[CalendarEra]:
+    """Return all eras for a calendar."""
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM calendar_eras WHERE calendar_id = ? ORDER BY start_year",
+        (calendar_id,),
+    )
+    return [CalendarEra.from_row(dict(r)) for r in rows]
+
+
+def delete_calendar_eras(calendar_id: str) -> None:
+    """Delete all eras for a calendar."""
+    DatabaseManager().execute(
+        "DELETE FROM calendar_eras WHERE calendar_id = ?", (calendar_id,)
+    )
+
+
+# ------------------------------------------------------------------
+# Leap year rules
+# ------------------------------------------------------------------
+
+def create_leap_year_rule(rule: LeapYearRule) -> LeapYearRule:
+    """Insert a new leap year rule."""
+    DatabaseManager().execute(
+        """
+        INSERT INTO calendar_leap_year_rules
+            (id, calendar_id, rule_type, interval, offset,
+             month, days_to_add, description)
+        VALUES (:id, :calendar_id, :rule_type, :interval, :offset,
+                :month, :days_to_add, :description)
+        """,
+        rule.to_row(),
+    )
+    return rule
+
+
+def list_leap_year_rules(calendar_id: str) -> list[LeapYearRule]:
+    """Return all leap year rules for a calendar."""
+    rows = DatabaseManager().fetchall(
+        "SELECT * FROM calendar_leap_year_rules WHERE calendar_id = ? ORDER BY interval",
+        (calendar_id,),
+    )
+    return [LeapYearRule.from_row(dict(r)) for r in rows]
+
+
+def delete_leap_year_rules(calendar_id: str) -> None:
+    """Delete all leap year rules for a calendar."""
+    DatabaseManager().execute(
+        "DELETE FROM calendar_leap_year_rules WHERE calendar_id = ?", (calendar_id,)
+    )

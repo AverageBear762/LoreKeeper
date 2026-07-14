@@ -249,3 +249,176 @@ class MapConnection:
             notes=row.get("notes", ""),
             show_on_map=bool(row.get("show_on_map", 0)),
         )
+
+
+# ---------------------------------------------------------------------------
+# Calendar models
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Calendar:
+    """A calendar system definition."""
+    id: str = field(default_factory=_uuid)
+    name: str = ""
+    description: str = ""
+    epoch: str = ""
+    days_in_week: int = 7
+    created_at: str = field(default_factory=_now)
+    updated_at: str = field(default_factory=_now)
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "epoch": self.epoch,
+            "days_in_week": self.days_in_week,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Calendar:
+        return cls(
+            id=row["id"],
+            name=row["name"],
+            description=row.get("description", ""),
+            epoch=row.get("epoch", ""),
+            days_in_week=int(row.get("days_in_week", 7)),
+            created_at=row.get("created_at", ""),
+            updated_at=row.get("updated_at", ""),
+        )
+
+
+@dataclass
+class CalendarMonth:
+    """A month in a calendar."""
+    id: str = field(default_factory=_uuid)
+    calendar_id: str = ""
+    name: str = ""
+    days: int = 30
+    position: int = 0
+    created_at: str = field(default_factory=_now)
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "calendar_id": self.calendar_id,
+            "name": self.name,
+            "days": self.days,
+            "position": self.position,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> CalendarMonth:
+        return cls(
+            id=row["id"],
+            calendar_id=row["calendar_id"],
+            name=row["name"],
+            days=int(row.get("days", 30)),
+            position=int(row.get("position", 0)),
+            created_at=row.get("created_at", ""),
+        )
+
+
+@dataclass
+class CalendarWeekday:
+    """A weekday in a calendar."""
+    id: str = field(default_factory=_uuid)
+    calendar_id: str = ""
+    name: str = ""
+    position: int = 0
+    created_at: str = field(default_factory=_now)
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "calendar_id": self.calendar_id,
+            "name": self.name,
+            "position": self.position,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> CalendarWeekday:
+        return cls(
+            id=row["id"],
+            calendar_id=row["calendar_id"],
+            name=row["name"],
+            position=int(row.get("position", 0)),
+            created_at=row.get("created_at", ""),
+        )
+
+
+@dataclass
+class CalendarEra:
+    """An era within a calendar."""
+    id: str = field(default_factory=_uuid)
+    calendar_id: str = ""
+    name: str = ""
+    abbreviation: str = ""
+    start_year: int = 1
+    is_primary: bool = False
+    created_at: str = field(default_factory=_now)
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "calendar_id": self.calendar_id,
+            "name": self.name,
+            "abbreviation": self.abbreviation,
+            "start_year": self.start_year,
+            "is_primary": 1 if self.is_primary else 0,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> CalendarEra:
+        return cls(
+            id=row["id"],
+            calendar_id=row["calendar_id"],
+            name=row["name"],
+            abbreviation=row.get("abbreviation", ""),
+            start_year=int(row.get("start_year", 1)),
+            is_primary=bool(row.get("is_primary", 0)),
+            created_at=row.get("created_at", ""),
+        )
+
+
+@dataclass
+class LeapYearRule:
+    """A rule defining when leap years occur."""
+    id: str = field(default_factory=_uuid)
+    calendar_id: str = ""
+    rule_type: str = "interval"
+    interval: int = 4
+    offset: int = 0
+    month: int = 2
+    days_to_add: int = 1
+    description: str = ""
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "calendar_id": self.calendar_id,
+            "rule_type": self.rule_type,
+            "interval": self.interval,
+            "offset": self.offset,
+            "month": self.month,
+            "days_to_add": self.days_to_add,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> LeapYearRule:
+        return cls(
+            id=row["id"],
+            calendar_id=row["calendar_id"],
+            rule_type=row.get("rule_type", "interval"),
+            interval=int(row.get("interval", 4)),
+            offset=int(row.get("offset", 0)),
+            month=int(row.get("month", 2)),
+            days_to_add=int(row.get("days_to_add", 1)),
+            description=row.get("description", ""),
+        )
