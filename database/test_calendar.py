@@ -53,7 +53,7 @@ class TestCalendarEngine(unittest.TestCase):
             delete_calendar(cal.id)
 
     # ------------------------------------------------------------------
-    # CRUD tests
+    # CRUD tests  (1–5: original, unchanged)
     # ------------------------------------------------------------------
 
     def test_create_calendar(self):
@@ -122,7 +122,7 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertEqual(months[2].name, "Mar")
 
     # ------------------------------------------------------------------
-    # CalendarEngine tests
+    # CalendarEngine tests  (6–15: original, adapted for new API)
     # ------------------------------------------------------------------
 
     def test_engine_load_and_properties(self):
@@ -211,7 +211,7 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertEqual(d["year"], 1)
         self.assertEqual(d["month"], 12)
         self.assertEqual(d["day"], 31)
-        self.assertEqual(d["weekday_name"], "Monday")  # 365 mod 7 = 1, so day 364 = Monday
+        self.assertEqual(d["weekday_name"], "Monday")
 
         # Day 365 = Jan 1, year 2
         d = engine.absolute_day_to_date(365)
@@ -233,8 +233,7 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertEqual(d["era_abbr"], "BC")
         self.assertEqual(d["era_year"], 1)  # 1 BC
 
-        # Day -366 = Jan 1, year 0 (if year 0 is a leap year = 366 days)
-        # Year 0 is a leap year in the proleptic Gregorian (divisible by 4, 100, 400)
+        # Day -366 = Jan 1, year 0 (year 0 is a leap year = 366 days)
         d = engine.absolute_day_to_date(-366)
         self.assertEqual(d["year"], 0)
         self.assertEqual(d["month"], 1)
@@ -253,33 +252,13 @@ class TestCalendarEngine(unittest.TestCase):
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Test a few dates
         test_cases = [
-            (2024, 1, 1),    # Jan 1, 2024
-            (2024, 2, 29),   # Feb 29, 2024 (leap day)
-            (2024, 12, 31),  # Dec 31, 2024
-            (2023, 3, 15),   # Mar 15, 2023
-            (2000, 1, 1),    # Jan 1, 2000 (leap year)
-            (1900, 1, 1),    # Jan 1, 1900 (not a leap year)
-        ]
-
-        for year, month, day in test_cases:
-            abs_day = engine.date_to_absolute_day(year, month, day)
-            d = engine.absolute_day_to_date(abs_day)
-            self.assertEqual(d["year"], year, f"Year mismatch for {year}-{month}-{day}")
-            self.assertEqual(d["month"], month, f"Month mismatch for {year}-{month}-{day}")
-            self.assertEqual(d["day"], day, f"Day mismatch for {year}-{month}-{day}")
-
-    def test_roundtrip_date_bc(self):
-        """Test date roundtrip for BC dates (astronomical years <= 0)."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        test_cases = [
-            (0, 1, 1),     # Jan 1, 1 BC
-            (0, 12, 31),   # Dec 31, 1 BC
-            (-1, 1, 1),    # Jan 1, 2 BC
-            (-100, 7, 15), # Jul 15, 101 BC
+            (2024, 1, 1),
+            (2024, 2, 29),
+            (2024, 12, 31),
+            (2023, 3, 15),
+            (2000, 1, 1),
+            (1900, 1, 1),
         ]
 
         for year, month, day in test_cases:
@@ -294,34 +273,17 @@ class TestCalendarEngine(unittest.TestCase):
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Jan 1, 2024 = Monday
         abs_day = engine.date_to_absolute_day(2024, 1, 1)
         d = engine.absolute_day_to_date(abs_day)
         self.assertEqual(d["weekday_name"], "Monday")
 
-        # Jan 8, 2024 = Monday (7 days later)
         abs_day = engine.date_to_absolute_day(2024, 1, 8)
         d = engine.absolute_day_to_date(abs_day)
         self.assertEqual(d["weekday_name"], "Monday")
 
-        # Jan 7, 2024 = Sunday
         abs_day = engine.date_to_absolute_day(2024, 1, 7)
         d = engine.absolute_day_to_date(abs_day)
         self.assertEqual(d["weekday_name"], "Sunday")
-
-    def test_weekday_negative(self):
-        """Test weekday cycle works for negative absolute days."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        # Day 0 = Monday (Jan 1, year 1)
-        # Day -1 = Sunday (Dec 31, year 0)
-        # Day -2 = Saturday
-        self.assertEqual(engine.absolute_day_to_date(0)["weekday_name"], "Monday")
-        self.assertEqual(engine.absolute_day_to_date(-1)["weekday_name"], "Sunday")
-        self.assertEqual(engine.absolute_day_to_date(-2)["weekday_name"], "Saturday")
-        self.assertEqual(engine.absolute_day_to_date(-7)["weekday_name"], "Monday")
-        self.assertEqual(engine.absolute_day_to_date(-8)["weekday_name"], "Sunday")
 
     def test_format_date(self):
         """Test date formatting."""
@@ -330,30 +292,10 @@ class TestCalendarEngine(unittest.TestCase):
 
         abs_day = engine.date_to_absolute_day(2024, 7, 4)
         formatted = engine.format_date(abs_day)
-        # Should contain month, day, year info
         self.assertIn("July", formatted)
         self.assertIn("4", formatted)
         self.assertIn("2024", formatted)
         self.assertIn("AD", formatted)
-
-    def test_format_date_bc(self):
-        """Test date formatting for BC dates."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        # Dec 31, 1 BC
-        abs_day = engine.date_to_absolute_day(0, 12, 31)
-        formatted = engine.format_date(abs_day)
-        self.assertIn("December", formatted)
-        self.assertIn("31", formatted)
-        self.assertIn("1 BC", formatted)
-
-        # Jan 1, 2 BC
-        abs_day = engine.date_to_absolute_day(-1, 1, 1)
-        formatted = engine.format_date(abs_day)
-        self.assertIn("January", formatted)
-        self.assertIn("1", formatted)
-        self.assertIn("2 BC", formatted)
 
     def test_default_earth_calendar_seeded(self):
         """Test that the default Earth calendar is correctly seeded."""
@@ -396,8 +338,9 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertEqual(d["era_year"], 2024)
         self.assertEqual(d["era_abbr"], "AD")
 
-        # 1 BC = astronomical year 0
-        d = engine.absolute_day_to_date(-1)
+        # 1 BC = astronomical year 0 (year 0 hidden from user)
+        abs_day = engine.date_to_absolute_day(0, 12, 31)
+        d = engine.absolute_day_to_date(abs_day)
         self.assertEqual(d["era_year"], 1, "Dec 31, 1 BC should have era_year=1")
         self.assertEqual(d["era_abbr"], "BC")
 
@@ -413,197 +356,378 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertEqual(d["era_year"], 100, "Year -99 should be era_year=100 (100 BC)")
         self.assertEqual(d["era_abbr"], "BC")
 
-    def test_era_year_span(self):
-        """Test era year at the BC/AD boundary."""
+    # ------------------------------------------------------------------
+    # Negative-day roundtrip  (new)
+    # ------------------------------------------------------------------
+
+    def test_negative_roundtrip_bc(self):
+        """Test negative absolute-day round trips for BC dates."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Dec 31, 1 BC (astronomical year 0)
-        d = engine.date_to_absolute_day(0, 12, 31)
-        date = engine.absolute_day_to_date(d)
-        self.assertEqual(date["era_year"], 1)
-        self.assertEqual(date["era_abbr"], "BC")
+        test_cases = [
+            (0, 1, 1),     # Jan 1, 1 BC
+            (0, 2, 28),    # Feb 28, 1 BC
+            (0, 2, 29),    # Feb 29, 1 BC (year 0 is leap!)
+            (0, 12, 31),   # Dec 31, 1 BC
+            (-1, 1, 1),    # Jan 1, 2 BC
+            (-1, 7, 4),    # Jul 4, 2 BC
+            (-99, 3, 15),  # Mar 15, 100 BC
+            (-100, 12, 1), # Dec 1, 101 BC
+        ]
 
-        # Jan 1, 1 AD (astronomical year 1) = day 0
-        self.assertEqual(engine.absolute_day_to_date(0)["era_abbr"], "AD")
-        self.assertEqual(engine.absolute_day_to_date(0)["era_year"], 1)
+        for year, month, day in test_cases:
+            abs_day = engine.date_to_absolute_day(year, month, day)
+            self.assertLess(abs_day, 0, f"BC date {year}-{month}-{day} should give negative abs_day")
+            d = engine.absolute_day_to_date(abs_day)
+            self.assertEqual(d["year"], year, f"Year mismatch for {year}-{month}-{day}")
+            self.assertEqual(d["month"], month, f"Month mismatch for {year}-{month}-{day}")
+            self.assertEqual(d["day"], day, f"Day mismatch for {year}-{month}-{day}")
 
     # ------------------------------------------------------------------
-    # add_days / days_between tests
+    # BC/AD transition — no visible year zero  (new)
     # ------------------------------------------------------------------
 
-    def test_add_days_simple(self):
-        """Test adding days to a date."""
+    def test_bc_ad_transition_no_year_zero(self):
+        """Test that year 0 is never visible in formatted output."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Jan 1, 2024 + 1 day = Jan 2, 2024
-        d = engine.add_days(2024, 1, 1, 1)
+        # Last day of 1 BC
+        d = engine.absolute_day_to_date(-1)
+        self.assertEqual(d["era_year"], 1)
+        self.assertEqual(d["era_abbr"], "BC")
+        self.assertNotEqual(d["era_year"], 0)
+
+        # First day of 1 AD
+        d = engine.absolute_day_to_date(0)
+        self.assertEqual(d["era_year"], 1)
+        self.assertEqual(d["era_abbr"], "AD")
+        self.assertNotEqual(d["era_year"], 0)
+
+        # Format them
+        self.assertIn("1 BC", engine.format_date(-1))
+        self.assertIn("1 AD", engine.format_date(0))
+
+        # The day after "1 BC" is "1 AD" — no year 0 gap
+        d1 = engine.absolute_day_to_date(-1)
+        d2 = engine.absolute_day_to_date(0)
+        self.assertEqual(d1["month"], 12)
+        self.assertEqual(d1["day"], 31)
+        self.assertEqual(d2["month"], 1)
+        self.assertEqual(d2["day"], 1)
+
+    # ------------------------------------------------------------------
+    # Date validation — ValueError tests  (new / adapted)
+    # ------------------------------------------------------------------
+
+    def test_validate_date_valid(self):
+        """Valid dates must not raise ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        # These should all pass without exception
+        engine.validate_date(2024, 1, 1)
+        engine.validate_date(2024, 2, 29)   # Leap day
+        engine.validate_date(2023, 2, 28)   # Non-leap
+        engine.validate_date(2024, 12, 31)  # End of year
+        engine.validate_date(2000, 2, 29)   # 400-year century leap
+        engine.validate_date(1900, 2, 28)   # Century non-leap
+
+    def test_validate_invalid_month_raises(self):
+        """Invalid month numbers must raise ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 0, 1)
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 13, 1)
+
+    def test_validate_invalid_day_raises(self):
+        """Invalid day numbers must raise ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 4, 0)
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 4, 31)  # April has 30 days
+
+    def test_validate_invalid_feb29_raises(self):
+        """Invalid February 29 must raise ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        # 2023 is not leap → Feb 29 invalid
+        with self.assertRaises(ValueError):
+            engine.validate_date(2023, 2, 29)
+
+        # 1900 is not leap → Feb 29 invalid
+        with self.assertRaises(ValueError):
+            engine.validate_date(1900, 2, 29)
+
+        # 2024 IS leap → Feb 29 valid
+        engine.validate_date(2024, 2, 29)
+
+    def test_validate_no_calendar_raises(self):
+        """Validation with no months defined must raise ValueError."""
+        cal = Calendar(name="EmptyCal")
+        create_calendar(cal)
+        engine = CalendarEngine(cal.id)
+
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 1, 1)
+
+    # ------------------------------------------------------------------
+    # Custom month lengths  (new)
+    # ------------------------------------------------------------------
+
+    def test_custom_month_lengths(self):
+        """Test that custom month lengths are handled correctly."""
+        cal = Calendar(name="CustomMonths")
+        create_calendar(cal)
+        cid = cal.id
+
+        # Two months: "Long" (45 days) and "Short" (15 days)
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="Long", days=45, position=1))
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="Short", days=15, position=2))
+
+        engine = CalendarEngine(cid)
+        self.assertEqual(engine.days_in_year, 60)
+
+        # Day 0 = Jan 1, year 1 = Long 1
+        d = engine.absolute_day_to_date(0)
+        self.assertEqual(d["month"], 1)
+        self.assertEqual(d["month_name"], "Long")
+        self.assertEqual(d["day"], 1)
+
+        # Day 44 = Long 45 (last day of Long)
+        d = engine.absolute_day_to_date(44)
+        self.assertEqual(d["month"], 1)
+        self.assertEqual(d["day"], 45)
+
+        # Day 45 = Short 1 (first day of Short)
+        d = engine.absolute_day_to_date(45)
+        self.assertEqual(d["month"], 2)
+        self.assertEqual(d["month_name"], "Short")
+        self.assertEqual(d["day"], 1)
+
+        # Day 59 = Short 15 (last day of year)
+        d = engine.absolute_day_to_date(59)
+        self.assertEqual(d["month"], 2)
+        self.assertEqual(d["day"], 15)
+
+        # Day 60 = Long 1, year 2
+        d = engine.absolute_day_to_date(60)
+        self.assertEqual(d["year"], 2)
+        self.assertEqual(d["month"], 1)
+        self.assertEqual(d["day"], 1)
+
+    # ------------------------------------------------------------------
+    # Custom weekday counts  (new)
+    # ------------------------------------------------------------------
+
+    def test_custom_weekday_counts(self):
+        """Test calendars with non-7-day week cycles."""
+        cal = Calendar(name="CustomWeek")
+        create_calendar(cal)
+        cid = cal.id
+
+        # 10-day week: Primidi, Duodi, Tridi, Quartidi, Quintidi, Sextidi, Septidi, Octidi, Nonidi, Decadi
+        week_names = ["Primidi", "Duodi", "Tridi", "Quartidi", "Quintidi",
+                      "Sextidi", "Septidi", "Octidi", "Nonidi", "Decadi"]
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="M", days=30, position=1))
+        for i, name in enumerate(week_names):
+            create_calendar_weekday(CalendarWeekday(calendar_id=cid, name=name, position=i + 1))
+
+        engine = CalendarEngine(cid)
+
+        # Day 0 = Primidi
+        self.assertEqual(engine.absolute_day_to_date(0)["weekday_name"], "Primidi")
+        # Day 10 = Primidi again (cycle of 10)
+        self.assertEqual(engine.absolute_day_to_date(10)["weekday_name"], "Primidi")
+        # Day 9 = Decadi (last day of week)
+        self.assertEqual(engine.absolute_day_to_date(9)["weekday_name"], "Decadi")
+        # Negative days
+        self.assertEqual(engine.absolute_day_to_date(-1)["weekday_name"], "Decadi")
+        self.assertEqual(engine.absolute_day_to_date(-10)["weekday_name"], "Primidi")
+
+    # ------------------------------------------------------------------
+    # add_days and days_between — absolute-day-based  (new)
+    # ------------------------------------------------------------------
+
+    def test_add_days_absolute(self):
+        """Test add_days(absolute_day, days) → int."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        # Jan 1, 2024 absolute day
+        abs_day = engine.date_to_absolute_day(2024, 1, 1)
+
+        # +1 day
+        self.assertEqual(engine.add_days(abs_day, 1), abs_day + 1)
+
+        # +365 days
+        self.assertEqual(engine.add_days(abs_day, 365), abs_day + 365)
+
+        # -1 day
+        self.assertEqual(engine.add_days(abs_day, -1), abs_day - 1)
+
+    def test_days_between_absolute(self):
+        """Test days_between(from_day, to_day) → int."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        day1 = engine.date_to_absolute_day(2024, 1, 1)
+        day2 = engine.date_to_absolute_day(2024, 1, 2)
+
+        self.assertEqual(engine.days_between(day1, day2), 1)
+        self.assertEqual(engine.days_between(day2, day1), -1)
+        self.assertEqual(engine.days_between(day1, day1), 0)
+
+    # ------------------------------------------------------------------
+    # add_days_to_date / days_between_dates — date-based  (adapted)
+    # ------------------------------------------------------------------
+
+    def test_add_days_to_date_simple(self):
+        """Test adding days to a date via add_days_to_date."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        d = engine.add_days_to_date(2024, 1, 1, 1)
         self.assertEqual(d["year"], 2024)
         self.assertEqual(d["month"], 1)
         self.assertEqual(d["day"], 2)
 
-        # Jan 1, 2024 + 31 days = Feb 1, 2024
-        d = engine.add_days(2024, 1, 1, 31)
+        d = engine.add_days_to_date(2024, 1, 1, 31)
         self.assertEqual(d["year"], 2024)
         self.assertEqual(d["month"], 2)
         self.assertEqual(d["day"], 1)
 
-        # Dec 31, 2024 + 1 day = Jan 1, 2025
-        d = engine.add_days(2024, 12, 31, 1)
+        d = engine.add_days_to_date(2024, 12, 31, 1)
         self.assertEqual(d["year"], 2025)
         self.assertEqual(d["month"], 1)
         self.assertEqual(d["day"], 1)
 
-    def test_add_days_negative(self):
+    def test_add_days_to_date_negative(self):
         """Test subtracting days from a date."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Jan 1, 2024 - 1 day = Dec 31, 2023
-        d = engine.add_days(2024, 1, 1, -1)
+        d = engine.add_days_to_date(2024, 1, 1, -1)
         self.assertEqual(d["year"], 2023)
         self.assertEqual(d["month"], 12)
         self.assertEqual(d["day"], 31)
 
-        # Jan 1, year 1 - 1 day = Dec 31, 1 BC
-        d = engine.add_days(1, 1, 1, -1)
-        self.assertEqual(d["year"], 0)  # Astronomical year 0 = 1 BC
+        d = engine.add_days_to_date(1, 1, 1, -1)
+        self.assertEqual(d["year"], 0)
         self.assertEqual(d["month"], 12)
         self.assertEqual(d["day"], 31)
         self.assertEqual(d["era_abbr"], "BC")
         self.assertEqual(d["era_year"], 1)
 
-    def test_add_days_cross_era(self):
+    def test_add_days_to_date_cross_era(self):
         """Test adding days that cross the BC/AD boundary."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Dec 31, 1 BC + 1 day = Jan 1, 1 AD
-        d = engine.add_days(0, 12, 31, 1)
+        d = engine.add_days_to_date(0, 12, 31, 1)
         self.assertEqual(d["year"], 1)
         self.assertEqual(d["month"], 1)
         self.assertEqual(d["day"], 1)
         self.assertEqual(d["era_abbr"], "AD")
 
-    def test_days_between(self):
-        """Test calculating days between two dates."""
+    def test_days_between_dates(self):
+        """Test days_between_dates."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Jan 1 to Jan 2 = 1 day
-        self.assertEqual(
-            engine.days_between(2024, 1, 1, 2024, 1, 2), 1
-        )
+        self.assertEqual(engine.days_between_dates(2024, 1, 1, 2024, 1, 2), 1)
+        self.assertEqual(engine.days_between_dates(2024, 1, 1, 2024, 1, 1), 0)
+        self.assertEqual(engine.days_between_dates(2024, 1, 1, 2024, 2, 1), 31)
 
-        # Jan 1 to Jan 1 = 0 days
-        self.assertEqual(
-            engine.days_between(2024, 1, 1, 2024, 1, 1), 0
-        )
-
-        # Jan 1 to Feb 1 = 31 days (January has 31 days)
-        self.assertEqual(
-            engine.days_between(2024, 1, 1, 2024, 2, 1), 31
-        )
-
-    def test_days_between_cross_year(self):
-        """Test days_between across year boundaries."""
+    def test_days_between_dates_cross_year(self):
+        """Test days_between_dates across year boundaries."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Dec 31, 2024 to Jan 1, 2025 = 1 day
-        self.assertEqual(
-            engine.days_between(2024, 12, 31, 2025, 1, 1), 1
-        )
+        self.assertEqual(engine.days_between_dates(2024, 12, 31, 2025, 1, 1), 1)
+        self.assertEqual(engine.days_between_dates(2024, 1, 1, 2025, 1, 1), 366)
 
-        # Jan 1, 2024 to Jan 1, 2025 = 366 days (2024 is leap)
-        self.assertEqual(
-            engine.days_between(2024, 1, 1, 2025, 1, 1), 366
-        )
-
-    def test_days_between_negative(self):
-        """Test days_between returns negative when date2 < date1."""
+    def test_days_between_dates_bc_ad(self):
+        """Test days_between_dates across the BC/AD boundary."""
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Jan 2 to Jan 1 = -1 day
-        self.assertEqual(
-            engine.days_between(2024, 1, 2, 2024, 1, 1), -1
-        )
-
-    def test_days_between_bc_ad(self):
-        """Test days_between across the BC/AD boundary."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        # Dec 31, 1 BC to Jan 1, 1 AD = 1 day
-        self.assertEqual(
-            engine.days_between(0, 12, 31, 1, 1, 1), 1
-        )
-
-        # Jan 1, 1 AD to Dec 31, 1 BC = -1 day
-        self.assertEqual(
-            engine.days_between(1, 1, 1, 0, 12, 31), -1
-        )
+        self.assertEqual(engine.days_between_dates(0, 12, 31, 1, 1, 1), 1)
+        self.assertEqual(engine.days_between_dates(1, 1, 1, 0, 12, 31), -1)
 
     # ------------------------------------------------------------------
-    # Date validation tests
+    # Era independence: eras must NOT affect canonical dates  (new)
     # ------------------------------------------------------------------
 
-    def test_validate_date_valid(self):
-        """Test that valid dates pass validation."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        self.assertTrue(engine.validate_date(2024, 1, 1)["valid"])
-        self.assertTrue(engine.validate_date(2024, 2, 29)["valid"])   # Leap day
-        self.assertTrue(engine.validate_date(2023, 2, 28)["valid"])   # Non-leap
-        self.assertTrue(engine.validate_date(2024, 12, 31)["valid"])  # End of year
-
-    def test_validate_date_invalid_month(self):
-        """Test invalid month numbers."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        self.assertFalse(engine.validate_date(2024, 0, 1)["valid"])
-        self.assertFalse(engine.validate_date(2024, 13, 1)["valid"])
-
-    def test_validate_date_invalid_day(self):
-        """Test invalid day numbers."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        self.assertFalse(engine.validate_date(2024, 4, 0)["valid"])
-        self.assertFalse(engine.validate_date(2024, 4, 31)["valid"])   # April has 30 days
-
-    def test_validate_date_leap_day(self):
-        """Test Feb 29 validation for leap vs non-leap years."""
-        cid = CalendarEngine.seed_default_earth_calendar()
-        engine = CalendarEngine(cid)
-
-        # 2024 is leap → Feb 29 is valid
-        self.assertTrue(engine.validate_date(2024, 2, 29)["valid"])
-
-        # 2023 is not leap → Feb 29 is invalid
-        self.assertFalse(engine.validate_date(2023, 2, 29)["valid"])
-
-        # 1900 is not leap (century exception) → Feb 29 is invalid
-        self.assertFalse(engine.validate_date(1900, 2, 29)["valid"])
-
-        # 2000 is leap (400-year exception) → Feb 29 is valid
-        self.assertTrue(engine.validate_date(2000, 2, 29)["valid"])
-
-    def test_validate_date_no_calendar(self):
-        """Test validation with no months defined."""
-        cal = Calendar(name="EmptyCal")
+    def test_eras_do_not_alter_canonical_dates(self):
+        """Test that changing eras does not change absolute day ↔ year/month/day mapping."""
+        cal = Calendar(name="EraIndependence")
         create_calendar(cal)
-        engine = CalendarEngine(cal.id)
-        result = engine.validate_date(2024, 1, 1)
-        self.assertFalse(result["valid"])
-        self.assertIn("no months", result["error"])
+        cid = cal.id
+
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="M", days=30, position=1))
+        create_calendar_weekday(CalendarWeekday(calendar_id=cid, name="D", position=1))
+
+        engine = CalendarEngine(cid)
+        # No eras defined yet — canonical dates must still work
+        self.assertEqual(engine.date_to_absolute_day(1, 1, 1), 0)
+        self.assertEqual(engine.absolute_day_to_date(0)["year"], 1)
+        self.assertEqual(engine.absolute_day_to_date(29)["year"], 1)
+        self.assertEqual(engine.absolute_day_to_date(30)["year"], 2)
+
+        # Add an era starting at year 5 — should NOT change day 0 → year 1
+        create_calendar_era(CalendarEra(
+            calendar_id=cid, name="Later Era", abbreviation="LE",
+            start_year=5, is_primary=True,
+        ))
+        engine2 = CalendarEngine(cid)
+
+        # Canonical dates unchanged
+        self.assertEqual(engine2.date_to_absolute_day(1, 1, 1), 0)
+        self.assertEqual(engine2.absolute_day_to_date(0)["year"], 1)
+        self.assertEqual(engine2.absolute_day_to_date(29)["year"], 1)
+        self.assertEqual(engine2.absolute_day_to_date(30)["year"], 2)
+
+        # Only era display metadata changed
+        d = engine2.absolute_day_to_date(0)
+        self.assertEqual(d["era_abbr"], "LE")  # Later Era starts at year 5, but year 1 < 5, so last matching era is none → first era
+        # Actually let me check: eras sorted by start_year = [Later Era]. For year=1, era.start_year=5 <= 1? No. So current_era=None, then set to self._eras[0] = Later Era.
+        # era_year = year - 5 + 1 = 1 - 5 + 1 = -3. Hmm, that's odd display but mathematically correct.
+        # The key test: canonical date (year=1, month=1, day=1) is UNCHANGED.
+
+    def test_no_eras_still_works(self):
+        """Test that a calendar with no eras still produces correct canonical dates."""
+        cal = Calendar(name="NoEras")
+        create_calendar(cal)
+        cid = cal.id
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="M", days=30, position=1))
+        create_calendar_weekday(CalendarWeekday(calendar_id=cid, name="D", position=1))
+
+        engine = CalendarEngine(cid)
+        self.assertEqual(len(engine.eras), 0)
+
+        # Canonical dates work without eras
+        d = engine.absolute_day_to_date(0)
+        self.assertEqual(d["year"], 1)
+        self.assertEqual(d["month"], 1)
+        self.assertEqual(d["day"], 1)
+
+        abs_day = engine.date_to_absolute_day(5, 1, 15)
+        d = engine.absolute_day_to_date(abs_day)
+        self.assertEqual(d["year"], 5)
+        self.assertEqual(d["month"], 1)
+        self.assertEqual(d["day"], 15)
 
     # ------------------------------------------------------------------
-    # Leap rule verification tests
+    # Leap rule verification tests  (kept)
     # ------------------------------------------------------------------
 
     def test_verify_leap_rules_valid(self):
@@ -613,7 +737,6 @@ class TestCalendarEngine(unittest.TestCase):
 
         result = engine.verify_leap_rules()
         self.assertTrue(result["valid"])
-        # Should have no errors
         self.assertEqual(len(result["errors"]), 0)
 
     def test_verify_leap_rules_no_rules(self):
@@ -644,7 +767,7 @@ class TestCalendarEngine(unittest.TestCase):
         self.assertGreaterEqual(len(result["errors"]), 1)
 
     # ------------------------------------------------------------------
-    # Leap year rules for negative years
+    # Leap year rules for negative years  (kept)
     # ------------------------------------------------------------------
 
     def test_leap_year_negative(self):
@@ -652,13 +775,8 @@ class TestCalendarEngine(unittest.TestCase):
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Year 0 (1 BC) is divisible by 4 → leap in proleptic Gregorian
         self.assertTrue(engine.is_leap_year(0))
-
-        # Year -1 (2 BC) is NOT divisible by 4 → not leap
         self.assertFalse(engine.is_leap_year(-1))
-
-        # Year -4 (5 BC) IS divisible by 4 → leap (Python's modulo works for negatives)
         self.assertTrue(engine.is_leap_year(-4))
 
     def test_leap_year_negative_century(self):
@@ -666,10 +784,7 @@ class TestCalendarEngine(unittest.TestCase):
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Year -100 (101 BC) is divisible by 4 and 100 → NOT leap (century exception)
         self.assertFalse(engine.is_leap_year(-100))
-
-        # Year -400 (401 BC) is divisible by 4, 100, and 400 → IS leap
         self.assertTrue(engine.is_leap_year(-400))
 
     def test_days_in_year_negative(self):
@@ -677,14 +792,51 @@ class TestCalendarEngine(unittest.TestCase):
         cid = CalendarEngine.seed_default_earth_calendar()
         engine = CalendarEngine(cid)
 
-        # Year 0 (1 BC) is a leap year → 366 days
         self.assertEqual(engine.get_days_in_year(0), 366)
-
-        # Year -1 (2 BC) is not leap → 365 days
         self.assertEqual(engine.get_days_in_year(-1), 365)
-
-        # Year -100 (101 BC) is not leap (century) → 365 days
         self.assertEqual(engine.get_days_in_year(-100), 365)
+
+    # ------------------------------------------------------------------
+    # Additional edge cases  (new)
+    # ------------------------------------------------------------------
+
+    def test_weekday_negative(self):
+        """Test weekday cycle works for negative absolute days."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        self.assertEqual(engine.absolute_day_to_date(0)["weekday_name"], "Monday")
+        self.assertEqual(engine.absolute_day_to_date(-1)["weekday_name"], "Sunday")
+        self.assertEqual(engine.absolute_day_to_date(-2)["weekday_name"], "Saturday")
+        self.assertEqual(engine.absolute_day_to_date(-7)["weekday_name"], "Monday")
+        self.assertEqual(engine.absolute_day_to_date(-8)["weekday_name"], "Sunday")
+
+    def test_format_date_bc(self):
+        """Test date formatting for BC dates."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        abs_day = engine.date_to_absolute_day(0, 12, 31)
+        formatted = engine.format_date(abs_day)
+        self.assertIn("December", formatted)
+        self.assertIn("31", formatted)
+        self.assertIn("1 BC", formatted)
+
+        abs_day = engine.date_to_absolute_day(-1, 1, 1)
+        formatted = engine.format_date(abs_day)
+        self.assertIn("January", formatted)
+        self.assertIn("1", formatted)
+        self.assertIn("2 BC", formatted)
+
+    def test_validate_date_valid_bc(self):
+        """Test validation for valid BC dates."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        # These should not raise
+        engine.validate_date(0, 2, 29)    # 1 BC is leap year
+        engine.validate_date(-1, 2, 28)   # 2 BC is not leap, Feb has 28
+        engine.validate_date(-100, 1, 1)  # 101 BC, Jan 1
 
 
 if __name__ == "__main__":

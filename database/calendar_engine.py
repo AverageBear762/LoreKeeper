@@ -7,12 +7,18 @@ Supports custom months, weekdays, eras, and leap year rules.
 All dates are stored as absolute_day (signed integer) where day 0 = 1-01-01
 of the calendar's epoch. Negative absolute days represent dates before year 1.
 
-The engine uses astronomical year numbering internally:
-  - Year 1 = 1 AD / 1 CE
-  - Year 0 = 1 BC / 1 BCE
-  - Year -1 = 2 BC / 2 BCE
-  - etc.
+The engine uses **astronomical year numbering internally**:
+  - Year  1  =  1 AD / 1 CE   (the epoch year — absolute day 0)
+  - Year  0  =  1 BC / 1 BCE
+  - Year -1  =  2 BC / 2 BCE
+  - Year -2  =  3 BC / 3 BCE
+
 This makes date arithmetic simple and continuous across the BC/AD boundary.
+**Users never see year 0** — eras convert it to "1 BC" in display formatting.
+
+**Eras are display metadata only.** They never reset or alter absolute-day
+calculation. Absolute day 0 always refers to the same fixed epoch regardless
+of which eras are defined.
 """
 
 from __future__ import annotations
@@ -136,9 +142,7 @@ class CalendarEngine:
         Works for any integer year (positive, zero, or negative) because
         Python's modulo always returns a non-negative result.
         """
-        if rule.rule_type == "interval":
-            return (year - rule.offset) % rule.interval == 0
-        elif rule.rule_type == "exception":
+        if rule.rule_type in ("interval", "exception"):
             return (year - rule.offset) % rule.interval == 0
         return False
 
@@ -233,6 +237,10 @@ class CalendarEngine:
 
     # ------------------------------------------------------------------
     # Date calculations
+    #
+    # ERAS NEVER AFFECT THESE CALCULATIONS.
+    # Absolute day 0 is always Jan 1, astronomical year 1, regardless
+    # of era configuration. Eras are display-only (see absolute_day_to_date).
     # ------------------------------------------------------------------
 
     def year_to_absolute_day(self, year: int) -> int:
@@ -281,6 +289,10 @@ class CalendarEngine:
 
         Works for any signed integer absolute_day (including negative).
 
+        The era lookup is purely for display metadata. It does NOT affect
+        the year, month, or day calculation. Absolute day 0 always maps
+        to year=1, month=1, day=1 regardless of era configuration.
+
         Returns:
             dict with keys: year (astronomical), month, day, weekday_name,
                             weekday_index, era_name, era_abbr, era_year,
@@ -290,11 +302,6 @@ class CalendarEngine:
 
         # ---------------------------------------------------------------
         # Walk forward (abs_day >= 0) or backward (abs_day < 0) to find year
-        #
-        # TODO: For very distant dates (|year| > 10000), consider precomputing
-        # year-length tables or using leap-cycle periodicity to avoid
-        # year-by-year iteration.  Optimization preferred but not required
-        # for the current feature set.
         # ---------------------------------------------------------------
         if abs_day >= 0:
             remaining = abs_day
@@ -342,7 +349,7 @@ class CalendarEngine:
         weekday_name = self._weekdays[weekday_idx].name if self._weekdays else ""
 
         # ---------------------------------------------------------------
-        # Era
+        # Era — DISPLAY METADATA ONLY. Never affects year/month/day.
         # ---------------------------------------------------------------
         current_era: Optional[CalendarEra] = None
         for era in self._eras:
@@ -353,14 +360,14 @@ class CalendarEngine:
         if current_era is None and self._eras:
             current_era = self._eras[0]
 
-        # Era year
+        # Era year hides astronomical year 0 from users:
+        #   - Primary eras (AD/CE):  era_year = year - start_year + 1
+        #   - Non-primary eras (BC/BCE):  era_year = start_year - year + 1
         era_year = year
         if current_era:
             if current_era.is_primary:
-                # Forward-counting era (AD/CE): era_year = year - start_year + 1
                 era_year = year - current_era.start_year + 1
             else:
-                # Backward-counting era (BC/BCE): era_year = start_year - year + 1
                 era_year = current_era.start_year - year + 1
 
         return {
@@ -381,8 +388,20 @@ class CalendarEngine:
     # Date manipulation
     # ------------------------------------------------------------------
 
-    def add_days(self, year: int, month: int, day: int, days: int) -> dict[str, Any]:
-        """Add a number of days to a date and return the resulting date.
+    def add_days(self, absolute_day: int, days: int) -> int:
+        """Add (or subtract) days from an absolute day value.
+
+        Args:
+            absolute_day: A signed absolute day
+            days: Number of days to add (negative to subtract)
+
+        Returns:
+            New absolute_day value
+        """
+        return absolute_day + days
+
+    def add_days_to_date(self, year: int, month: int, day: int, days: int) -> dict[str, Any]:
+        """Add days to a calendar date and return the resulting date dict.
 
         Args:
             year: Astronomical year
@@ -396,41 +415,47 @@ class CalendarEngine:
         abs_day = self.date_to_absolute_day(year, month, day)
         return self.absolute_day_to_date(abs_day + days)
 
-    def days_between(
+    def days_between(self, from_day: int, to_day: int) -> int:
+        """Calculate the number of days between two absolute day values.
+
+        Returns (to_day - from_day). Result is negative if to_day < from_day.
+        """
+        return to_day - from_day
+
+    def days_between_dates(
         self, year1: int, month1: int, day1: int,
         year2: int, month2: int, day2: int,
     ) -> int:
-        """Calculate the number of days between two dates.
+        """Calculate the number of days between two calendar dates.
 
-        Returns (date2 - date1) in days. Result is negative if date2 < date1.
+        Returns (date2 - date1). Result is negative if date2 < date1.
         """
         abs1 = self.date_to_absolute_day(year1, month1, day1)
         abs2 = self.date_to_absolute_day(year2, month2, day2)
         return abs2 - abs1
 
     # ------------------------------------------------------------------
-    # Date validation
+    # Date validation (raises ValueError on invalid input)
     # ------------------------------------------------------------------
 
-    def validate_date(self, year: int, month: int, day: int) -> dict[str, Any]:
-        """Validate a calendar date.
+    def validate_date(self, year: int, month: int, day: int) -> None:
+        """Validate a calendar date, raising ValueError for any invalid input.
 
         Args:
             year: Astronomical year
             month: Month (1-based)
             day: Day (1-based)
 
-        Returns:
-            dict with 'valid' (bool) and optionally 'error' (str).
+        Raises:
+            ValueError: If the date is invalid, with a descriptive message.
         """
         if not self._months:
-            return {"valid": False, "error": "Calendar has no months defined."}
+            raise ValueError("Calendar has no months defined.")
 
         if month < 1 or month > len(self._months):
-            return {
-                "valid": False,
-                "error": f"Month {month} out of range (1-{len(self._months)}).",
-            }
+            raise ValueError(
+                f"Month {month} out of range (1-{len(self._months)})."
+            )
 
         max_days = self._months[month - 1].days
         for rule in self._leap_rules:
@@ -438,20 +463,17 @@ class CalendarEngine:
                 max_days += rule.days_to_add
 
         if max_days < 1:
-            return {
-                "valid": False,
-                "error": f"Month {month} has no days in year {year} "
-                         f"(leap rule reduced days to {max_days}).",
-            }
+            raise ValueError(
+                f"Month {month} has no days in astronomical year {year} "
+                f"(leap rule reduced days to {max_days})."
+            )
 
         if day < 1 or day > max_days:
-            return {
-                "valid": False,
-                "error": f"Day {day} out of range for month {month}, year {year} "
-                         f"(1-{max_days}).",
-            }
-
-        return {"valid": True}
+            raise ValueError(
+                f"Day {day} out of range for month {month}, year "
+                f"{'year ' + str(year) if year else '1 BC'} "
+                f"(1-{max_days})."
+            )
 
     # ------------------------------------------------------------------
     # Formatting
@@ -517,6 +539,7 @@ class CalendarEngine:
         # Create eras using astronomical year numbering:
         #   BC era starts at year 0 (astronomical) = 1 BC
         #   AD era starts at year 1 (astronomical) = 1 AD
+        # These have DIFFERENT start years so there is a clear boundary.
         crud.create_calendar_era(CalendarEra(
             calendar_id=cid, name="Before Christ", abbreviation="BC",
             start_year=0, is_primary=False, created_at=now,
@@ -544,3 +567,14 @@ class CalendarEngine:
         ))
 
         return cid
+
+
+# ======================================================================
+# Optimization TODO
+# ======================================================================
+# TODO: For very distant dates (|year| > 10000), consider precomputing
+# year-length tables or using leap-cycle periodicity to avoid year-by-year
+# iteration in year_to_absolute_day(), absolute_day_to_date(), and
+# get_days_in_year(). The current linear walk works fine for typical
+# worldbuilding calendars (|year| < 10000) but will be slow for deep-time
+# or sci-fi calendars spanning millions of years.
