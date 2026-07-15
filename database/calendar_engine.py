@@ -290,6 +290,11 @@ class CalendarEngine:
 
         # ---------------------------------------------------------------
         # Walk forward (abs_day >= 0) or backward (abs_day < 0) to find year
+        #
+        # TODO: For very distant dates (|year| > 10000), consider precomputing
+        # year-length tables or using leap-cycle periodicity to avoid
+        # year-by-year iteration.  Optimization preferred but not required
+        # for the current feature set.
         # ---------------------------------------------------------------
         if abs_day >= 0:
             remaining = abs_day
