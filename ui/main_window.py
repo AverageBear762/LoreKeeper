@@ -40,6 +40,7 @@ from database.manager import DatabaseManager
 from database.models import Article
 from ui.article_view import ArticleView
 from ui.backup_manager import export_json_dialog, import_json_dialog, backup_database_dialog
+from ui.calendar_manager import CalendarManagerDialog
 from ui.search_dialog import SearchDialog
 from ui.sidebar import Sidebar
 from ui.template_editor import TemplateManagementDialog
@@ -175,6 +176,12 @@ class MainWindow(QMainWindow):
         self.act_backup_db = QAction("&Backup Database...", self)
         self.act_backup_db.triggered.connect(self._on_backup_db)
         tools_menu.addAction(self.act_backup_db)
+
+        tools_menu.addSeparator()
+
+        self.act_calendar_manager = QAction("📅 &Calendar Manager...", self)
+        self.act_calendar_manager.triggered.connect(self._on_calendar_manager)
+        tools_menu.addAction(self.act_calendar_manager)
 
         # -- Templates menu --
         templates_menu = menubar.addMenu("&Templates")
@@ -688,6 +695,11 @@ class MainWindow(QMainWindow):
         dialog.templates_changed.connect(self.sidebar.refresh_category_tree)
         dialog.exec()
         self.sidebar.refresh_category_tree()
+
+    def _on_calendar_manager(self) -> None:
+        """Open the Calendar Manager dialog."""
+        dlg = CalendarManagerDialog(self)
+        dlg.exec()
 
     def _on_seed_templates(self) -> None:
         """Restore default templates."""
