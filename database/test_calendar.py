@@ -838,6 +838,185 @@ class TestCalendarEngine(unittest.TestCase):
         engine.validate_date(-1, 2, 28)   # 2 BC is not leap, Feb has 28
         engine.validate_date(-100, 1, 1)  # 101 BC, Jan 1
 
+    # ------------------------------------------------------------------
+    # Phase 2: WorldDatePicker tests (test engine logic backing the picker)
+    # ------------------------------------------------------------------
+
+    def test_calendar_switching_roundtrip(self):
+        """Test date round-trips correctly when switching between calendars."""
+        # Create two different calendars
+        cal1 = Calendar(name="CalA")
+        create_calendar(cal1)
+        cid1 = cal1.id
+        # 10 months of 36 days each, 5-day weekdays
+        for i in range(10):
+            create_calendar_month(CalendarMonth(calendar_id=cid1, name=f"Month{i+1}", days=36, position=i+1))
+        for i, name in enumerate(["A", "B", "C", "D", "E"]):
+            create_calendar_weekday(CalendarWeekday(calendar_id=cid1, name=name, position=i+1))
+
+        cal2 = Calendar(name="CalB")
+        create_calendar(cal2)
+        cid2 = cal2.id
+        for i in range(4):
+            create_calendar_month(CalendarMonth(calendar_id=cid2, name=f"Q{i+1}", days=91, position=i+1))
+        for i, name in enumerate(["Alpha", "Beta", "Gamma"]):
+            create_calendar_weekday(CalendarWeekday(calendar_id=cid2, name=name, position=i+1))
+
+        engine1 = CalendarEngine(cid1)
+        engine2 = CalendarEngine(cid2)
+
+        # Date in CalA
+        abs1 = engine1.date_to_absolute_day(5, 3, 15)
+        d = engine1.absolute_day_to_date(abs1)
+        self.assertEqual(d["year"], 5)
+        self.assertEqual(d["month"], 3)
+        self.assertEqual(d["day"], 15)
+
+        # Same absolute_day in CalB should decode to different date
+        d2 = engine2.absolute_day_to_date(abs1)
+        self.assertIsInstance(d2["year"], int)
+        self.assertIsInstance(d2["month"], int)
+        self.assertIsInstance(d2["day"], int)
+
+        # Switching back to CalA preserves original
+        d3 = engine1.absolute_day_to_date(abs1)
+        self.assertEqual(d3["year"], 5)
+        self.assertEqual(d3["month"], 3)
+        self.assertEqual(d3["day"], 15)
+
+    def test_forward_and_backward_counting_eras(self):
+        """Test both forward-counting (AD) and backward-counting (BC) eras."""
+        cal = Calendar(name="DualEra")
+        create_calendar(cal)
+        cid = cal.id
+        create_calendar_month(CalendarMonth(calendar_id=cid, name="M", days=30, position=1))
+        create_calendar_weekday(CalendarWeekday(calendar_id=cid, name="D", position=1))
+        # Forward era starting at year 100
+        create_calendar_era(CalendarEra(calendar_id=cid, name="Post", abbreviation="P",
+                                        start_year=100, is_primary=True))
+        # Backward era starting at year 99
+        create_calendar_era(CalendarEra(calendar_id=cid, name="Ante", abbreviation="A",
+                                        start_year=99, is_primary=False))
+
+        engine = CalendarEngine(cid)
+
+        # Year 100 = era_year 1 Post (forward)
+        d = engine.date_to_absolute_day(100, 1, 1)
+        date = engine.absolute_day_to_date(d)
+        self.assertEqual(date["era_abbr"], "P")
+        self.assertEqual(date["era_year"], 1)
+
+        # Year 99 = era_year 1 Ante (backward)
+        d = engine.date_to_absolute_day(99, 1, 1)
+        date = engine.absolute_day_to_date(d)
+        self.assertEqual(date["era_abbr"], "A")
+        self.assertEqual(date["era_year"], 1)
+
+        # Year 90 = era_year 10 Ante (backward: 99 - 90 + 1 = 10)
+        d = engine.date_to_absolute_day(90, 1, 1)
+        date = engine.absolute_day_to_date(d)
+        self.assertEqual(date["era_abbr"], "A")
+        self.assertEqual(date["era_year"], 10)
+
+        # Year 105 = era_year 6 Post (forward: 105 - 100 + 1 = 6)
+        d = engine.date_to_absolute_day(105, 1, 1)
+        date = engine.absolute_day_to_date(d)
+        self.assertEqual(date["era_abbr"], "P")
+        self.assertEqual(date["era_year"], 6)
+
+    def test_era_display_no_year_zero(self):
+        """Test that year 0 is never visible in any era display."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        for abs_day in range(-10, 11):
+            d = engine.absolute_day_to_date(abs_day)
+            self.assertNotEqual(d["era_year"], 0, f"era_year=0 at abs_day={abs_day}")
+            # BC/AD boundary: -1 is 1 BC, 0 is 1 AD
+            if abs_day < 0:
+                self.assertEqual(d["era_abbr"], "BC")
+            else:
+                self.assertEqual(d["era_abbr"], "AD")
+
+    def test_leap_day_feb29_valid_leap(self):
+        """Feb 29 is valid in leap years."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        engine.validate_date(2024, 2, 29)  # Should not raise
+        engine.validate_date(2000, 2, 29)  # 400-year exception
+        engine.validate_date(0, 2, 29)     # Year 0 (1 BC) is leap
+
+    def test_leap_day_feb29_invalid_non_leap(self):
+        """Feb 29 raises ValueError in non-leap years."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        with self.assertRaises(ValueError):
+            engine.validate_date(2023, 2, 29)   # Not leap
+        with self.assertRaises(ValueError):
+            engine.validate_date(1900, 2, 29)   # Century exception
+        with self.assertRaises(ValueError):
+            engine.validate_date(-1, 2, 29)     # 2 BC not leap
+
+    def test_invalid_month_13_rejected(self):
+        """Month 13 raises ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 13, 1)
+
+    def test_invalid_day_32_rejected(self):
+        """Day 32 raises ValueError."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+        with self.assertRaises(ValueError):
+            engine.validate_date(2024, 1, 32)
+
+    def test_negative_absolute_day_roundtrip(self):
+        """Negative absolute_day round-trips correctly."""
+        cid = CalendarEngine.seed_default_earth_calendar()
+        engine = CalendarEngine(cid)
+
+        for abs_day in [0, -1, -365, -366, -731, -1000]:
+            d = engine.absolute_day_to_date(abs_day)
+            back = engine.date_to_absolute_day(d["year"], d["month"], d["day"])
+            self.assertEqual(back, abs_day, f"Round-trip failed for abs_day={abs_day}")
+
+    def test_era_change_preserves_canonical_dates(self):
+        """Adding, modifying, or removing eras does NOT change absolute_day→date mapping."""
+        cal = Calendar(name="EraTest")
+        create_calendar(cal)
+        cid = cal.id
+        for i in range(3):
+            create_calendar_month(CalendarMonth(calendar_id=cid, name=f"M{i+1}", days=30, position=i+1))
+        create_calendar_weekday(CalendarWeekday(calendar_id=cid, name="D", position=1))
+
+        engine = CalendarEngine(cid)
+        # No eras
+        d0 = engine.absolute_day_to_date(0)
+        self.assertEqual(d0["year"], 1)
+
+        # Add eras
+        create_calendar_era(CalendarEra(calendar_id=cid, name="Old", abbreviation="O",
+                                        start_year=0, is_primary=False))
+        create_calendar_era(CalendarEra(calendar_id=cid, name="New", abbreviation="N",
+                                        start_year=10, is_primary=True))
+        engine2 = CalendarEngine(cid)
+
+        # Canonical date unchanged regardless of eras
+        d1 = engine2.absolute_day_to_date(0)
+        self.assertEqual(d1["year"], 1)
+        self.assertEqual(d1["month"], 1)
+        self.assertEqual(d1["day"], 1)
+
+        # Test at a year within the New era
+        abs10 = engine2.date_to_absolute_day(15, 1, 1)
+        d2 = engine2.absolute_day_to_date(abs10)
+        self.assertEqual(d2["year"], 15)
+        self.assertEqual(d2["era_abbr"], "N")
+        self.assertEqual(d2["era_year"], 6)  # 15 - 10 + 1 = 6
+
 
 if __name__ == "__main__":
     unittest.main()

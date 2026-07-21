@@ -2,29 +2,17 @@
 World Garden — Calendar Manager Window.
 
 Provides a dialog for creating, editing, and deleting calendars.
-Each calendar has configurable months, weekdays, eras, and leap year rules
-with drag-and-drop reordering and inline editing.
-
-Layout:
-  ┌────────────┬──────────────────────────────────────────┐
-  │  Calendar  │  Tab Widget                              │
-  │  List      │  ┌───────┬──────┬──────┬──────────┐     │
-  │            │  │Months │Days  │Eras  │Leap Rules│     │
-  │  ┌──────┐  │  ├───────┴──────┴──────┴──────────┤     │
-  │  │ Cal1 │  │  │  Editable list / form area      │     │
-  │  │ Cal2 │  │  │  (depends on selected tab)      │     │
-  │  └──────┘  │  │                                  │     │
-  │ +Add       │  │                                  │     │
-  │ -Delete    │  │                                  │     │
-  └────────────┴──────────────────────────────────────────┘
+Each calendar has configurable months, weekdays, eras, leap year rules,
+a live preview, drag-and-drop reordering, and default calendar support.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Slot, Signal
-from PySide6.QtGui import QAction, QKeySequence, QIntValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -32,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -43,7 +32,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -55,23 +43,31 @@ from PySide6.QtWidgets import (
 from database import crud
 from database.calendar_engine import CalendarEngine
 from database.models import (
-    Calendar,
-    CalendarMonth,
-    CalendarWeekday,
-    CalendarEra,
-    LeapYearRule,
-    _now,
-    _uuid,
+    Calendar, CalendarMonth, CalendarWeekday, CalendarEra, LeapYearRule, _now,
 )
+
+DEFAULT_CALENDAR_PATH = Path.home() / ".worldgarden" / "default_calendar.json"
+
+
+def _get_default_calendar_id() -> Optional[str]:
+    try:
+        if DEFAULT_CALENDAR_PATH.exists():
+            return json.loads(DEFAULT_CALENDAR_PATH.read_text()).get("calendar_id")
+    except Exception:
+        pass
+    return None
+
+
+def _set_default_calendar_id(calendar_id: str) -> None:
+    DEFAULT_CALENDAR_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_CALENDAR_PATH.write_text(json.dumps({"calendar_id": calendar_id}))
 
 
 # ======================================================================
-# Reorderable table widget
+# ReorderableTableWidget
 # ======================================================================
 
 class ReorderableTableWidget(QTableWidget):
-    """A QTableWidget with drag-and-drop row reordering enabled."""
-
     row_order_changed = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -93,275 +89,278 @@ class ReorderableTableWidget(QTableWidget):
 
 
 # ======================================================================
-# Calendar Manager Dialog
+# CalendarManagerDialog
 # ======================================================================
 
 class CalendarManagerDialog(QDialog):
-    """Main Calendar Manager dialog."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("📅 Calendar Manager")
-        self.setMinimumSize(900, 600)
-        self.resize(1000, 650)
+        self.setMinimumSize(950, 620)
+        self.resize(1050, 680)
 
         self._calendars: list[Calendar] = []
         self._current_calendar_id: Optional[str] = None
         self._dirty: bool = False
+        self._default_cal_id: Optional[str] = _get_default_calendar_id()
+        self._preview_year: int = 1
 
         self._build_ui()
         self._refresh_calendar_list()
 
     # ------------------------------------------------------------------
-    # UI construction
+    # UI
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        """Build left/right splitter layout."""
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
-        # -- Left panel: calendar list --
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # -- Left --
+        left = QWidget()
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
 
-        left_layout.addWidget(QLabel("<b>Calendars</b>"))
-
+        ll.addWidget(QLabel("<b>Calendars</b>"))
         self._cal_list = QListWidget()
         self._cal_list.currentRowChanged.connect(self._on_calendar_selected)
-        left_layout.addWidget(self._cal_list, stretch=1)
+        ll.addWidget(self._cal_list, stretch=1)
 
-        btn_layout = QHBoxLayout()
-        self._btn_add_cal = QPushButton("➕ New")
-        self._btn_add_cal.clicked.connect(self._on_add_calendar)
-        btn_layout.addWidget(self._btn_add_cal)
+        r1 = QHBoxLayout()
+        self._btn_add = QPushButton("➕ New")
+        self._btn_add.clicked.connect(self._on_add)
+        r1.addWidget(self._btn_add)
+        self._btn_dup = QPushButton("📋 Duplicate")
+        self._btn_dup.clicked.connect(self._on_duplicate)
+        self._btn_dup.setEnabled(False)
+        r1.addWidget(self._btn_dup)
+        ll.addLayout(r1)
 
-        self._btn_rename_cal = QPushButton("✏️ Rename")
-        self._btn_rename_cal.clicked.connect(self._on_rename_calendar)
-        self._btn_rename_cal.setEnabled(False)
-        btn_layout.addWidget(self._btn_rename_cal)
+        r2 = QHBoxLayout()
+        self._btn_ren = QPushButton("✏️ Rename")
+        self._btn_ren.clicked.connect(self._on_rename)
+        self._btn_ren.setEnabled(False)
+        r2.addWidget(self._btn_ren)
+        self._btn_del = QPushButton("🗑 Delete")
+        self._btn_del.clicked.connect(self._on_delete)
+        self._btn_del.setEnabled(False)
+        r2.addWidget(self._btn_del)
+        ll.addLayout(r2)
 
-        self._btn_delete_cal = QPushButton("🗑 Delete")
-        self._btn_delete_cal.clicked.connect(self._on_delete_calendar)
-        self._btn_delete_cal.setEnabled(False)
-        btn_layout.addWidget(self._btn_delete_cal)
+        self._btn_def = QPushButton("⭐ Set as Default")
+        self._btn_def.clicked.connect(self._on_set_default)
+        self._btn_def.setEnabled(False)
+        ll.addWidget(self._btn_def)
 
-        left_layout.addLayout(btn_layout)
-        splitter.addWidget(left_widget)
+        self._btn_seed = QPushButton("🌍 Seed Gregorian")
+        self._btn_seed.clicked.connect(self._on_seed)
+        ll.addWidget(self._btn_seed)
 
-        # -- Right panel: tabbed settings --
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        splitter.addWidget(left)
 
-        # General settings area
-        self._gen_group = QGroupBox("General")
-        gen_form = QFormLayout(self._gen_group)
-        self._edit_cal_name = QLineEdit()
-        self._edit_cal_name.setPlaceholderText("Calendar name")
-        self._edit_cal_name.textChanged.connect(self._mark_dirty)
-        gen_form.addRow("Name:", self._edit_cal_name)
+        # -- Right --
+        right = QWidget()
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 0, 0, 0)
 
-        self._edit_cal_desc = QPlainTextEdit()
-        self._edit_cal_desc.setMaximumHeight(80)
-        self._edit_cal_desc.setPlaceholderText("Description (optional)")
-        self._edit_cal_desc.textChanged.connect(self._mark_dirty)
-        gen_form.addRow("Description:", self._edit_cal_desc)
+        self._gen = QGroupBox("General")
+        gf = QFormLayout(self._gen)
+        self._edit_name = QLineEdit()
+        self._edit_name.setPlaceholderText("Calendar name")
+        self._edit_name.textChanged.connect(self._mark_dirty)
+        gf.addRow("Name:", self._edit_name)
+        self._edit_desc = QPlainTextEdit()
+        self._edit_desc.setMaximumHeight(80)
+        self._edit_desc.setPlaceholderText("Description (optional)")
+        self._edit_desc.textChanged.connect(self._mark_dirty)
+        gf.addRow("Description:", self._edit_desc)
+        self._edit_epoch = QLineEdit()
+        self._edit_epoch.setPlaceholderText("e.g. Traditional Gregorian epoch")
+        self._edit_epoch.textChanged.connect(self._mark_dirty)
+        gf.addRow("Epoch:", self._edit_epoch)
+        rl.addWidget(self._gen)
 
-        self._edit_cal_epoch = QLineEdit()
-        self._edit_cal_epoch.setPlaceholderText("e.g. Traditional Gregorian epoch")
-        self._edit_cal_epoch.textChanged.connect(self._mark_dirty)
-        gen_form.addRow("Epoch:", self._edit_cal_epoch)
-
-        right_layout.addWidget(self._gen_group)
-
-        # Settings tabs
-        self._settings_tabs = QTabWidget()
-
+        self._tabs = QTabWidget()
         self._build_months_tab()
         self._build_weekdays_tab()
         self._build_eras_tab()
-        self._build_leap_rules_tab()
+        self._build_leap_tab()
+        self._build_preview_tab()
+        rl.addWidget(self._tabs, stretch=1)
 
-        right_layout.addWidget(self._settings_tabs, stretch=1)
+        bb = QDialogButtonBox()
+        self._btn_rev = bb.addButton("↩ Revert", bb.ButtonRole.ResetRole)
+        self._btn_sav = bb.addButton("💾 Save", bb.ButtonRole.AcceptRole)
+        self._btn_cls = bb.addButton("Close", bb.ButtonRole.RejectRole)
+        self._btn_sav.clicked.connect(self._on_save)
+        self._btn_rev.clicked.connect(self._on_revert)
+        self._btn_cls.clicked.connect(self._on_close)
+        rl.addWidget(bb)
 
-        # Bottom buttons
-        btn_box = QDialogButtonBox()
-        self._btn_seed_default = QPushButton("🌍 Seed Gregorian Calendar")
-        self._btn_seed_default.clicked.connect(self._on_seed_default)
-        btn_box.addButton(self._btn_seed_default, btn_box.ButtonRole.ActionRole)
-        btn_box.addButton(self._btn_revert, btn_box.ButtonRole.ResetRole)
-        btn_box.addButton(self._btn_save, btn_box.ButtonRole.AcceptRole)
-        btn_box.addButton(self._btn_close, btn_box.ButtonRole.RejectRole)
-        right_layout.addWidget(btn_box)
-
-        self._btn_save = btn_box.button(btn_box.StandardButton.Save)
-        self._btn_revert = btn_box.button(btn_box.StandardButton.Reset)
-        self._btn_close = btn_box.button(btn_box.StandardButton.Close)
-
-        self._btn_save.clicked.connect(self._on_save)
-        self._btn_revert.clicked.connect(self._on_revert)
-        self._btn_close.clicked.connect(self._on_close)
-
-        splitter.addWidget(right_widget)
+        splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(splitter)
-
+        main = QVBoxLayout(self)
+        main.addWidget(splitter)
         self._set_right_enabled(False)
 
-    # ------------------------------------------------------------------
-    # Tab builders
-    # ------------------------------------------------------------------
-
     def _build_months_tab(self) -> None:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        self._months_table = ReorderableTableWidget()
-        self._months_table.setColumnCount(3)
-        self._months_table.setHorizontalHeaderLabels(["Name", "Days", ""])
-        self._months_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._months_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._months_table.horizontalHeader().resizeSection(1, 60)
-        self._months_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._months_table.horizontalHeader().resizeSection(2, 80)
-        layout.addWidget(self._months_table)
-
-        btn_row = QHBoxLayout()
-        self._btn_add_month = QPushButton("➕ Add Month")
-        self._btn_add_month.clicked.connect(self._on_add_month)
-        btn_row.addWidget(self._btn_add_month)
-
-        self._btn_remove_month = QPushButton("➖ Remove Selected")
-        self._btn_remove_month.clicked.connect(self._on_remove_month)
-        btn_row.addWidget(self._btn_remove_month)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._settings_tabs.addTab(tab, "Months")
+        t = QWidget()
+        l = QVBoxLayout(t)
+        self._mt = ReorderableTableWidget()
+        self._mt.setColumnCount(3)
+        self._mt.setHorizontalHeaderLabels(["Name", "Days", ""])
+        self._mt.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._mt.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._mt.horizontalHeader().resizeSection(1, 60)
+        self._mt.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._mt.horizontalHeader().resizeSection(2, 80)
+        l.addWidget(self._mt)
+        r = QHBoxLayout()
+        r.addWidget(self._bma := QPushButton("➕ Add"))
+        r.addWidget(self._bmr := QPushButton("➖ Remove"))
+        r.addStretch()
+        l.addLayout(r)
+        self._bma.clicked.connect(self._on_add_month)
+        self._bmr.clicked.connect(self._on_rem_month)
+        self._tabs.addTab(t, "Months")
 
     def _build_weekdays_tab(self) -> None:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        self._weekdays_table = ReorderableTableWidget()
-        self._weekdays_table.setColumnCount(2)
-        self._weekdays_table.setHorizontalHeaderLabels(["Name", ""])
-        self._weekdays_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._weekdays_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._weekdays_table.horizontalHeader().resizeSection(1, 80)
-        layout.addWidget(self._weekdays_table)
-
-        btn_row = QHBoxLayout()
-        self._btn_add_weekday = QPushButton("➕ Add Weekday")
-        self._btn_add_weekday.clicked.connect(self._on_add_weekday)
-        btn_row.addWidget(self._btn_add_weekday)
-
-        self._btn_remove_weekday = QPushButton("➖ Remove Selected")
-        self._btn_remove_weekday.clicked.connect(self._on_remove_weekday)
-        btn_row.addWidget(self._btn_remove_weekday)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._settings_tabs.addTab(tab, "Weekdays")
+        t = QWidget()
+        l = QVBoxLayout(t)
+        self._wt = ReorderableTableWidget()
+        self._wt.setColumnCount(2)
+        self._wt.setHorizontalHeaderLabels(["Name", ""])
+        self._wt.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._wt.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._wt.horizontalHeader().resizeSection(1, 80)
+        l.addWidget(self._wt)
+        r = QHBoxLayout()
+        r.addWidget(self._bwa := QPushButton("➕ Add"))
+        r.addWidget(self._bwr := QPushButton("➖ Remove"))
+        r.addStretch()
+        l.addLayout(r)
+        self._bwa.clicked.connect(self._on_add_wd)
+        self._bwr.clicked.connect(self._on_rem_wd)
+        self._tabs.addTab(t, "Weekdays")
 
     def _build_eras_tab(self) -> None:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        t = QWidget()
+        l = QVBoxLayout(t)
+        self._et = QTableWidget()
+        self._et.setColumnCount(5)
+        self._et.setHorizontalHeaderLabels(["Name", "Abbr", "Start Year", "Primary", ""])
+        self._et.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._et.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._et.horizontalHeader().resizeSection(1, 60)
+        self._et.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._et.horizontalHeader().resizeSection(2, 80)
+        self._et.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self._et.horizontalHeader().resizeSection(3, 60)
+        self._et.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self._et.horizontalHeader().resizeSection(4, 80)
+        l.addWidget(self._et)
+        r = QHBoxLayout()
+        r.addWidget(self._bea := QPushButton("➕ Add"))
+        r.addWidget(self._ber := QPushButton("➖ Remove"))
+        r.addStretch()
+        l.addLayout(r)
+        self._bea.clicked.connect(self._on_add_era)
+        self._ber.clicked.connect(self._on_rem_era)
+        self._tabs.addTab(t, "Eras")
 
-        self._eras_table = QTableWidget()
-        self._eras_table.setColumnCount(5)
-        self._eras_table.setHorizontalHeaderLabels(["Name", "Abbr", "Start Year", "Primary", ""])
-        self._eras_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._eras_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._eras_table.horizontalHeader().resizeSection(1, 60)
-        self._eras_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._eras_table.horizontalHeader().resizeSection(2, 80)
-        self._eras_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._eras_table.horizontalHeader().resizeSection(3, 60)
-        self._eras_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self._eras_table.horizontalHeader().resizeSection(4, 80)
-        layout.addWidget(self._eras_table)
+    def _build_leap_tab(self) -> None:
+        t = QWidget()
+        l = QVBoxLayout(t)
+        self._lt = QTableWidget()
+        self._lt.setColumnCount(6)
+        self._lt.setHorizontalHeaderLabels(["Type", "Interval", "Month", "Days ±", "Desc", ""])
+        self._lt.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._lt.horizontalHeader().resizeSection(0, 80)
+        self._lt.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._lt.horizontalHeader().resizeSection(1, 60)
+        self._lt.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._lt.horizontalHeader().resizeSection(2, 60)
+        self._lt.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self._lt.horizontalHeader().resizeSection(3, 60)
+        self._lt.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self._lt.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._lt.horizontalHeader().resizeSection(5, 80)
+        l.addWidget(self._lt)
+        r = QHBoxLayout()
+        r.addWidget(self._bla := QPushButton("➕ Add"))
+        r.addWidget(self._blr := QPushButton("➖ Remove"))
+        r.addWidget(self._bvf := QPushButton("🔍 Verify"))
+        r.addStretch()
+        l.addLayout(r)
+        self._bla.clicked.connect(self._on_add_leap)
+        self._blr.clicked.connect(self._on_rem_leap)
+        self._bvf.clicked.connect(self._on_verify)
+        self._tabs.addTab(t, "Leap Rules")
 
-        btn_row = QHBoxLayout()
-        self._btn_add_era = QPushButton("➕ Add Era")
-        self._btn_add_era.clicked.connect(self._on_add_era)
-        btn_row.addWidget(self._btn_add_era)
-
-        self._btn_remove_era = QPushButton("➖ Remove Selected")
-        self._btn_remove_era.clicked.connect(self._on_remove_era)
-        btn_row.addWidget(self._btn_remove_era)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._settings_tabs.addTab(tab, "Eras")
-
-    def _build_leap_rules_tab(self) -> None:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        self._leap_table = QTableWidget()
-        self._leap_table.setColumnCount(6)
-        self._leap_table.setHorizontalHeaderLabels(["Type", "Interval", "Month", "Days ±", "Description", ""])
-        self._leap_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self._leap_table.horizontalHeader().resizeSection(0, 80)
-        self._leap_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._leap_table.horizontalHeader().resizeSection(1, 70)
-        self._leap_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._leap_table.horizontalHeader().resizeSection(2, 60)
-        self._leap_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._leap_table.horizontalHeader().resizeSection(3, 60)
-        self._leap_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        self._leap_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self._leap_table.horizontalHeader().resizeSection(5, 80)
-        layout.addWidget(self._leap_table)
-
-        btn_row = QHBoxLayout()
-        self._btn_add_leap = QPushButton("➕ Add Leap Rule")
-        self._btn_add_leap.clicked.connect(self._on_add_leap_rule)
-        btn_row.addWidget(self._btn_add_leap)
-
-        self._btn_remove_leap = QPushButton("➖ Remove Selected")
-        self._btn_remove_leap.clicked.connect(self._on_remove_leap_rule)
-        btn_row.addWidget(self._btn_remove_leap)
-
-        self._btn_verify_leap = QPushButton("🔍 Verify Rules")
-        self._btn_verify_leap.clicked.connect(self._on_verify_leap_rules)
-        btn_row.addWidget(self._btn_verify_leap)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._settings_tabs.addTab(tab, "Leap Rules")
+    def _build_preview_tab(self) -> None:
+        t = QWidget()
+        l = QVBoxLayout(t)
+        nav = QHBoxLayout()
+        self._bpr = QPushButton("◀")
+        self._bpr.clicked.connect(lambda: self._shift_preview(-1))
+        nav.addWidget(self._bpr)
+        self._lbl_yr = QLabel("Year 1")
+        self._lbl_yr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_yr.setStyleSheet("font-size: 16px; font-weight: bold;")
+        nav.addWidget(self._lbl_yr, stretch=1)
+        self._bnx = QPushButton("▶")
+        self._bnx.clicked.connect(lambda: self._shift_preview(1))
+        nav.addWidget(self._bnx)
+        l.addLayout(nav)
+        self._pg = QGridLayout()
+        self._pg.setSpacing(2)
+        l.addLayout(self._pg)
+        l.addStretch()
+        self._tabs.addTab(t, "Preview")
 
     # ------------------------------------------------------------------
-    # Calendar list management
+    # Enable/disable
+    # ------------------------------------------------------------------
+
+    def _set_right_enabled(self, on: bool) -> None:
+        self._gen.setEnabled(on)
+        self._tabs.setEnabled(on)
+        self._btn_sav.setEnabled(on)
+        self._btn_rev.setEnabled(on)
+        self._btn_ren.setEnabled(on)
+        self._btn_del.setEnabled(on)
+        self._btn_dup.setEnabled(on)
+        self._btn_def.setEnabled(on)
+
+    # ------------------------------------------------------------------
+    # Calendar list
     # ------------------------------------------------------------------
 
     def _refresh_calendar_list(self) -> None:
-        """Reload the calendar list from the database."""
+        self._default_cal_id = _get_default_calendar_id()
         self._calendars = crud.list_calendars()
         self._cal_list.blockSignals(True)
         self._cal_list.clear()
         for cal in self._calendars:
-            item = QListWidgetItem(cal.name)
+            label = f"⭐ {cal.name}" if cal.id == self._default_cal_id else cal.name
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, cal.id)
             self._cal_list.addItem(item)
         self._cal_list.blockSignals(False)
+        self._update_def_btn()
 
-    def _set_right_enabled(self, enabled: bool) -> None:
-        self._gen_group.setEnabled(enabled)
-        self._settings_tabs.setEnabled(enabled)
-        self._btn_seed_default.setEnabled(enabled)
-        self._btn_save.setEnabled(enabled)
-        self._btn_revert.setEnabled(enabled)
-        self._btn_rename_cal.setEnabled(enabled)
-        self._btn_delete_cal.setEnabled(enabled)
+    def _update_def_btn(self) -> None:
+        if self._current_calendar_id == self._default_cal_id:
+            self._btn_def.setText("⭐ Default (current)")
+            self._btn_def.setEnabled(False)
+        else:
+            self._btn_def.setText("⭐ Set as Default")
+            self._btn_def.setEnabled(self._current_calendar_id is not None)
 
     # ------------------------------------------------------------------
-    # Calendar selection
+    # Selection
     # ------------------------------------------------------------------
 
     @Slot(int)
@@ -370,566 +369,427 @@ class CalendarManagerDialog(QDialog):
             self._current_calendar_id = None
             self._set_right_enabled(False)
             return
-
         cal = self._calendars[row]
         self._current_calendar_id = cal.id
         self._set_right_enabled(True)
-        self._load_calendar(cal)
+        self._update_def_btn()
+        self._load(cal)
 
-    def _load_calendar(self, cal: Calendar) -> None:
-        """Load a calendar's data into the right panel fields."""
-        self._edit_cal_name.blockSignals(True)
-        self._edit_cal_name.setText(cal.name)
-        self._edit_cal_name.blockSignals(False)
-
-        self._edit_cal_desc.blockSignals(True)
-        self._edit_cal_desc.setPlainText(cal.description)
-        self._edit_cal_desc.blockSignals(False)
-
-        self._edit_cal_epoch.blockSignals(True)
-        self._edit_cal_epoch.setText(cal.epoch)
-        self._edit_cal_epoch.blockSignals(False)
-
+    def _load(self, cal: Calendar) -> None:
+        for w, t in [(self._edit_name, cal.name), (self._edit_desc, cal.description), (self._edit_epoch, cal.epoch)]:
+            w.blockSignals(True)
+            if isinstance(w, QPlainTextEdit):
+                w.setPlainText(t)
+            else:
+                w.setText(t)
+            w.blockSignals(False)
         self._dirty = False
         self._load_months(cal.id)
         self._load_weekdays(cal.id)
         self._load_eras(cal.id)
-        self._load_leap_rules(cal.id)
+        self._load_leaps(cal.id)
+        self._load_preview(cal.id)
 
-    # ------------------------------------------------------------------
-    # Load sub-entities
-    # ------------------------------------------------------------------
-
-    def _load_months(self, calendar_id: str) -> None:
-        months = crud.list_calendar_months(calendar_id)
-        months.sort(key=lambda m: m.position)
-
-        self._months_table.setRowCount(len(months))
+    def _load_months(self, cid: str) -> None:
+        months = sorted(crud.list_calendar_months(cid), key=lambda m: m.position)
+        self._mt.setRowCount(len(months))
         for i, m in enumerate(months):
-            name_item = QTableWidgetItem(m.name)
-            self._months_table.setItem(i, 0, name_item)
+            self._mt.setItem(i, 0, QTableWidgetItem(m.name))
+            di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, m.days)
+            self._mt.setItem(i, 1, di)
+            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_month(r))
+            self._mt.setCellWidget(i, 2, b)
 
-            days_item = QTableWidgetItem()
-            days_item.setData(Qt.ItemDataRole.DisplayRole, m.days)
-            self._months_table.setItem(i, 1, days_item)
-
-            remove_btn = QPushButton("🗑")
-            remove_btn.clicked.connect(lambda checked=False, r=i: self._remove_month_at(r))
-            self._months_table.setCellWidget(i, 2, remove_btn)
-
-    def _load_weekdays(self, calendar_id: str) -> None:
-        days = crud.list_calendar_weekdays(calendar_id)
-        days.sort(key=lambda d: d.position)
-
-        self._weekdays_table.setRowCount(len(days))
+    def _load_weekdays(self, cid: str) -> None:
+        days = sorted(crud.list_calendar_weekdays(cid), key=lambda d: d.position)
+        self._wt.setRowCount(len(days))
         for i, d in enumerate(days):
-            name_item = QTableWidgetItem(d.name)
-            self._weekdays_table.setItem(i, 0, name_item)
+            self._wt.setItem(i, 0, QTableWidgetItem(d.name))
+            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_wd(r))
+            self._wt.setCellWidget(i, 1, b)
 
-            remove_btn = QPushButton("🗑")
-            remove_btn.clicked.connect(lambda checked=False, r=i: self._remove_weekday_at(r))
-            self._weekdays_table.setCellWidget(i, 1, remove_btn)
-
-    def _load_eras(self, calendar_id: str) -> None:
-        eras = crud.list_calendar_eras(calendar_id)
-        eras.sort(key=lambda e: e.start_year)
-
-        self._eras_table.setRowCount(len(eras))
+    def _load_eras(self, cid: str) -> None:
+        eras = sorted(crud.list_calendar_eras(cid), key=lambda e: e.start_year)
+        self._et.setRowCount(len(eras))
         for i, e in enumerate(eras):
-            self._eras_table.setItem(i, 0, QTableWidgetItem(e.name))
-            self._eras_table.setItem(i, 1, QTableWidgetItem(e.abbreviation))
-            year_item = QTableWidgetItem()
-            year_item.setData(Qt.ItemDataRole.DisplayRole, e.start_year)
-            self._eras_table.setItem(i, 2, year_item)
+            self._et.setItem(i, 0, QTableWidgetItem(e.name))
+            self._et.setItem(i, 1, QTableWidgetItem(e.abbreviation))
+            yi = QTableWidgetItem(); yi.setData(Qt.ItemDataRole.DisplayRole, e.start_year)
+            self._et.setItem(i, 2, yi)
+            cb = QCheckBox(); cb.setChecked(e.is_primary); cb.toggled.connect(self._mark_dirty)
+            self._et.setCellWidget(i, 3, cb)
+            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_era(r))
+            self._et.setCellWidget(i, 4, b)
 
-            primary_cb = QCheckBox()
-            primary_cb.setChecked(e.is_primary)
-            primary_cb.toggled.connect(self._mark_dirty)
-            self._eras_table.setCellWidget(i, 3, primary_cb)
-
-            remove_btn = QPushButton("🗑")
-            remove_btn.clicked.connect(lambda checked=False, r=i: self._remove_era_at(r))
-            self._eras_table.setCellWidget(i, 4, remove_btn)
-
-    def _load_leap_rules(self, calendar_id: str) -> None:
-        rules = crud.list_leap_year_rules(calendar_id)
-
-        self._leap_table.setRowCount(len(rules))
+    def _load_leaps(self, cid: str) -> None:
+        rules = crud.list_leap_year_rules(cid)
+        self._lt.setRowCount(len(rules))
         for i, r in enumerate(rules):
-            type_combo = QComboBox()
-            type_combo.addItems(["interval", "exception"])
-            type_combo.setCurrentText(r.rule_type)
-            self._leap_table.setCellWidget(i, 0, type_combo)
-
-            int_item = QTableWidgetItem()
-            int_item.setData(Qt.ItemDataRole.DisplayRole, r.interval)
-            self._leap_table.setItem(i, 1, int_item)
-
-            month_item = QTableWidgetItem()
-            month_item.setData(Qt.ItemDataRole.DisplayRole, r.month)
-            self._leap_table.setItem(i, 2, month_item)
-
-            days_item = QTableWidgetItem()
-            days_item.setData(Qt.ItemDataRole.DisplayRole, r.days_to_add)
-            self._leap_table.setItem(i, 3, days_item)
-
-            self._leap_table.setItem(i, 4, QTableWidgetItem(r.description))
-
-            remove_btn = QPushButton("🗑")
-            remove_btn.clicked.connect(lambda checked=False, r=i: self._remove_leap_at(r))
-            self._leap_table.setCellWidget(i, 5, remove_btn)
+            tc = QComboBox(); tc.addItems(["interval", "exception"]); tc.setCurrentText(r.rule_type)
+            self._lt.setCellWidget(i, 0, tc)
+            ni = QTableWidgetItem(); ni.setData(Qt.ItemDataRole.DisplayRole, r.interval)
+            self._lt.setItem(i, 1, ni)
+            mi = QTableWidgetItem(); mi.setData(Qt.ItemDataRole.DisplayRole, r.month)
+            self._lt.setItem(i, 2, mi)
+            di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, r.days_to_add)
+            self._lt.setItem(i, 3, di)
+            self._lt.setItem(i, 4, QTableWidgetItem(r.description))
+            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_leap(r))
+            self._lt.setCellWidget(i, 5, b)
 
     # ------------------------------------------------------------------
-    # Mark dirty
+    # Preview
     # ------------------------------------------------------------------
 
-    def _mark_dirty(self, *args: Any) -> None:
-        self._dirty = True
+    def _load_preview(self, cid: str) -> None:
+        while self._pg.count():
+            w = self._pg.takeAt(0)
+            if w.widget(): w.widget().deleteLater()
+
+        try:
+            eng = CalendarEngine(cid)
+        except Exception:
+            self._lbl_yr.setText("(Invalid calendar config)")
+            return
+        if not eng.months:
+            self._lbl_yr.setText("(No months)")
+            return
+
+        year = self._preview_year
+        wds = eng.weekdays
+        nwd = len(wds) if wds else 7
+        # Weekday header
+        if wds:
+            for c, wd in enumerate(wds):
+                lbl = QLabel(wd.name[:3]); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl.setStyleSheet("font-weight: bold; padding: 2px;")
+                self._pg.addWidget(lbl, 0, c)
+
+        ro = 1
+        for mi, mo in enumerate(eng.months):
+            md = mo.days
+            for r in eng.leap_rules:
+                if r.month == mi + 1 and eng.is_leap_affected(r, year):
+                    md += r.days_to_add
+            hdr = QLabel(f"<b>{mo.name} ({md})</b>")
+            hdr.setStyleSheet("background-color: palette(alternate-base); padding: 2px;")
+            self._pg.addWidget(hdr, ro, 0, 1, nwd)
+            ro += 1
+
+            try:
+                woff = eng.date_to_absolute_day(year, mi + 1, 1) % nwd
+            except Exception:
+                woff = 0
+
+            day = 1
+            rn = ((woff + md) + nwd - 1) // nwd
+            for rr in range(rn):
+                for cc in range(nwd):
+                    if rr == 0 and cc < woff:
+                        self._pg.addWidget(QLabel(""), ro + rr, cc)
+                    elif day <= md:
+                        leap = False
+                        for r in eng.leap_rules:
+                            if r.month == mi + 1 and eng.is_leap_affected(r, year) and day > eng.months[mi].days:
+                                leap = True
+                        lbl = QLabel(str(day)); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        lbl.setStyleSheet("color: #0d6efd; font-weight: bold; padding: 2px;" if leap else "padding: 2px;")
+                        self._pg.addWidget(lbl, ro + rr, cc)
+                        day += 1
+                    else:
+                        self._pg.addWidget(QLabel(""), ro + rr, cc)
+            ro += rn + 1
+        self._upd_pv_label(year)
+
+    def _upd_pv_label(self, year: int) -> None:
+        try:
+            eng = CalendarEngine(self._current_calendar_id) if self._current_calendar_id else None
+        except Exception:
+            eng = None
+        if eng and eng.eras:
+            era = None
+            for e in eng.eras:
+                if e.start_year <= year: era = e
+            if era is None and eng.eras: era = eng.eras[0]
+            if era:
+                ey = year - era.start_year + 1 if era.is_primary else era.start_year - year + 1
+                self._lbl_yr.setText(f"Year {ey} {era.abbreviation}")
+                self._preview_year = year
+                return
+        self._lbl_yr.setText(f"Year {year}")
+
+    def _shift_preview(self, d: int) -> None:
+        self._preview_year += d
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     # ------------------------------------------------------------------
-    # Calendar CRUD actions
+    # Calendar CRUD
     # ------------------------------------------------------------------
 
-    @Slot()
-    def _on_add_calendar(self) -> None:
+    def _on_add(self) -> None:
         name, ok = QInputDialog.getText(self, "New Calendar", "Calendar name:")
-        if not ok or not name.strip():
-            return
-        cal = Calendar(name=name.strip())
-        crud.create_calendar(cal)
+        if not ok or not name.strip(): return
+        crud.create_calendar(Calendar(name=name.strip()))
         self._refresh_calendar_list()
-        idx = self._cal_list.findText(cal.name, Qt.MatchFlag.MatchExactly)
-        if idx >= 0:
-            self._cal_list.setCurrentRow(idx)
+        self._select_by_name(name.strip())
 
-    @Slot()
-    def _on_rename_calendar(self) -> None:
-        if not self._current_calendar_id:
-            return
+    def _on_duplicate(self) -> None:
+        if not self._current_calendar_id: return
+        src = crud.get_calendar(self._current_calendar_id)
+        if not src: return
+        name, ok = QInputDialog.getText(self, "Duplicate", "Name:", text=f"{src.name} (copy)")
+        if not ok or not name.strip(): return
+        new = Calendar(name=name.strip(), description=src.description, epoch=src.epoch)
+        crud.create_calendar(new)
+        cid = new.id
+        for m in crud.list_calendar_months(src.id):
+            crud.create_calendar_month(CalendarMonth(calendar_id=cid, name=m.name, days=m.days, position=m.position))
+        for w in crud.list_calendar_weekdays(src.id):
+            crud.create_calendar_weekday(CalendarWeekday(calendar_id=cid, name=w.name, position=w.position))
+        for e in crud.list_calendar_eras(src.id):
+            crud.create_calendar_era(CalendarEra(calendar_id=cid, name=e.name, abbreviation=e.abbreviation, start_year=e.start_year, is_primary=e.is_primary))
+        for r in crud.list_leap_year_rules(src.id):
+            crud.create_leap_year_rule(LeapYearRule(calendar_id=cid, rule_type=r.rule_type, interval=r.interval, offset=r.offset, month=r.month, days_to_add=r.days_to_add, description=r.description))
+        self._refresh_calendar_list()
+        self._select_by_name(name.strip())
+
+    def _on_rename(self) -> None:
+        if not self._current_calendar_id: return
         cal = crud.get_calendar(self._current_calendar_id)
-        if not cal:
-            return
-        name, ok = QInputDialog.getText(self, "Rename Calendar", "New name:", text=cal.name)
-        if not ok or not name.strip():
-            return
-        cal.name = name.strip()
-        cal.updated_at = _now()
+        if not cal: return
+        name, ok = QInputDialog.getText(self, "Rename", "New name:", text=cal.name)
+        if not ok or not name.strip(): return
+        cal.name = name.strip(); cal.updated_at = _now()
         crud.update_calendar(cal)
         self._refresh_calendar_list()
-        idx = self._cal_list.findText(cal.name, Qt.MatchFlag.MatchExactly)
-        if idx >= 0:
-            self._cal_list.setCurrentRow(idx)
+        self._select_by_name(name.strip())
 
-    @Slot()
-    def _on_delete_calendar(self) -> None:
-        if not self._current_calendar_id:
+    def _on_delete(self) -> None:
+        if not self._current_calendar_id: return
+        if len(self._calendars) <= 1:
+            QMessageBox.warning(self, "Cannot Delete", "Cannot delete the last calendar. At least one must exist.")
             return
         cal = crud.get_calendar(self._current_calendar_id)
-        if not cal:
-            return
-        reply = QMessageBox.question(
-            self, "Delete Calendar",
-            f"Delete calendar '{cal.name}' and all its months, weekdays, eras, and leap rules?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        if not cal: return
+        extra = ""
+        if self._current_calendar_id == self._default_cal_id:
+            extra = "\n\n⚠️ This is the DEFAULT calendar."
+        reply = QMessageBox.question(self, "Delete Calendar",
+            f"Delete '{cal.name}' and all its months, weekdays, eras, and leap rules?{extra}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes: return
+        if self._current_calendar_id == self._default_cal_id:
+            DEFAULT_CALENDAR_PATH.unlink(missing_ok=True)
+            self._default_cal_id = None
         crud.delete_calendar(cal.id)
         self._current_calendar_id = None
         self._set_right_enabled(False)
         self._refresh_calendar_list()
 
-    @Slot()
-    def _on_seed_default(self) -> None:
-        reply = QMessageBox.question(
-            self, "Seed Gregorian Calendar",
-            "Add a new Gregorian (Earth) calendar with 12 months, 7-day weeks, and BC/AD eras?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+    def _on_set_default(self) -> None:
+        if not self._current_calendar_id: return
+        _set_default_calendar_id(self._current_calendar_id)
+        self._default_cal_id = self._current_calendar_id
+        self._refresh_calendar_list()
+        self._select_by_id(self._current_calendar_id)
+
+    def _on_seed(self) -> None:
+        if QMessageBox.question(self, "Seed Gregorian", "Add a Gregorian (Earth) calendar?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         cid = CalendarEngine.seed_default_earth_calendar()
         self._refresh_calendar_list()
         cal = crud.get_calendar(cid)
-        if cal:
-            idx = self._cal_list.findText(cal.name, Qt.MatchFlag.MatchExactly)
-            if idx >= 0:
-                self._cal_list.setCurrentRow(idx)
+        if cal: self._select_by_name(cal.name)
+
+    def _select_by_name(self, name: str) -> None:
+        for prefix in ("", "⭐ "):
+            idx = self._cal_list.findText(f"{prefix}{name}", Qt.MatchFlag.MatchExactly)
+            if idx >= 0: self._cal_list.setCurrentRow(idx); return
+
+    def _select_by_id(self, cid: str) -> None:
+        for i in range(self._cal_list.count()):
+            if self._cal_list.item(i).data(Qt.ItemDataRole.UserRole) == cid:
+                self._cal_list.setCurrentRow(i); return
 
     # ------------------------------------------------------------------
     # Save / Revert / Close
     # ------------------------------------------------------------------
 
-    @Slot()
     def _on_save(self) -> None:
-        if not self._current_calendar_id:
-            return
+        if not self._current_calendar_id: return
         cal = crud.get_calendar(self._current_calendar_id)
-        if not cal:
+        if not cal: return
+        name = self._edit_name.text().strip()
+        if not name: QMessageBox.warning(self, "Error", "Name is required."); return
+        if self._mt.rowCount() == 0: QMessageBox.warning(self, "Error", "At least one month required."); return
+        errs = self._validate()
+        if errs:
+            QMessageBox.warning(self, "Validation Errors", "\n".join(f"• {e}" for e in errs))
             return
-
-        new_name = self._edit_cal_name.text().strip()
-        if not new_name:
-            QMessageBox.warning(self, "Validation Error", "Calendar name is required.")
-            return
-
-        # Validate sub-entities
-        if self._months_table.rowCount() == 0:
-            QMessageBox.warning(self, "Validation Error", "Calendar must have at least one month.")
-            return
-
-        errors = self._collect_validation_errors()
-        if errors:
-            QMessageBox.warning(self, "Validation Error",
-                                "Please fix these issues:\n\n" + "\n".join(errors))
-            return
-
-        cal.name = new_name
-        cal.description = self._edit_cal_desc.toPlainText().strip()
-        cal.epoch = self._edit_cal_epoch.text().strip()
-        cal.updated_at = _now()
+        cal.name = name; cal.description = self._edit_desc.toPlainText().strip()
+        cal.epoch = self._edit_epoch.text().strip(); cal.updated_at = _now()
         crud.update_calendar(cal)
-
-        self._save_months(cal.id)
-        self._save_weekdays(cal.id)
-        self._save_eras(cal.id)
-        self._save_leap_rules(cal.id)
-
+        self._save_months(cal.id); self._save_weekdays(cal.id); self._save_eras(cal.id); self._save_leaps(cal.id)
         self._dirty = False
         self._refresh_calendar_list()
-        idx = self._cal_list.findText(cal.name, Qt.MatchFlag.MatchExactly)
-        if idx >= 0:
-            self._cal_list.setCurrentRow(idx)
+        self._select_by_id(cal.id)
+        QMessageBox.information(self, "Saved", f"'{cal.name}' saved.")
 
-    def _collect_validation_errors(self) -> list[str]:
-        errors: list[str] = []
+    def _validate(self) -> list[str]:
+        e: list[str] = []
+        if self._mt.rowCount() == 0: e.append("At least one month required.")
+        for i in range(self._mt.rowCount()):
+            n = self._mt.item(i, 0).text().strip() if self._mt.item(i, 0) else ""
+            if not n: e.append(f"Month {i+1}: name required.")
+            d = int(self._mt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 0) if self._mt.item(i, 1) else 0
+            if d < 1: e.append(f"Month '{n or i+1}': days must be ≥1.")
+        for i in range(self._wt.rowCount()):
+            n = self._wt.item(i, 0).text().strip() if self._wt.item(i, 0) else ""
+            if not n: e.append(f"Weekday {i+1}: name required.")
+        pc = 0
+        for i in range(self._et.rowCount()):
+            n = self._et.item(i, 0).text().strip() if self._et.item(i, 0) else ""
+            ab = self._et.item(i, 1).text().strip() if self._et.item(i, 1) else ""
+            if not n: e.append(f"Era {i+1}: name required.")
+            if not ab: e.append(f"Era '{n or i+1}': abbr required.")
+            w = self._et.cellWidget(i, 3)
+            if w and isinstance(w, QCheckBox) and w.isChecked(): pc += 1
+        if self._et.rowCount() > 0 and pc == 0: e.append("At least one era must be primary.")
+        for i in range(self._lt.rowCount()):
+            w = self._lt.cellWidget(i, 0)
+            rt = w.currentText() if w and isinstance(w, QComboBox) else "interval"
+            if rt not in ("interval", "exception"): e.append(f"Leap rule {i+1}: invalid type.")
+            iv = int(self._lt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 0) if self._lt.item(i, 1) else 0
+            if iv <= 0: e.append(f"Leap rule {i+1}: interval must be positive.")
+            mo = int(self._lt.item(i, 2).data(Qt.ItemDataRole.DisplayRole) or 0) if self._lt.item(i, 2) else 0
+            if mo < 1 or mo > self._mt.rowCount(): e.append(f"Leap rule {i+1}: month {mo} out of range.")
+        return e
 
-        # Check months
-        if self._months_table.rowCount() == 0:
-            errors.append("• At least one month is required.")
+    def _save_months(self, cid: str) -> None:
+        crud.delete_calendar_months(cid)
+        for i in range(self._mt.rowCount()):
+            n = self._mt.item(i, 0).text().strip() if self._mt.item(i, 0) else f"M{i+1}"
+            d = int(self._mt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 30) if self._mt.item(i, 1) else 30
+            crud.create_calendar_month(CalendarMonth(calendar_id=cid, name=n, days=d, position=i+1))
 
-        for i in range(self._months_table.rowCount()):
-            name_item = self._months_table.item(i, 0)
-            name = name_item.text().strip() if name_item else ""
-            if not name:
-                errors.append(f"• Month {i + 1}: name is required.")
+    def _save_weekdays(self, cid: str) -> None:
+        crud.delete_calendar_weekdays(cid)
+        for i in range(self._wt.rowCount()):
+            n = self._wt.item(i, 0).text().strip() if self._wt.item(i, 0) else f"D{i+1}"
+            crud.create_calendar_weekday(CalendarWeekday(calendar_id=cid, name=n, position=i+1))
 
-            days_item = self._months_table.item(i, 1)
-            days = int(days_item.data(Qt.ItemDataRole.DisplayRole) or 0)
-            if days < 1:
-                errors.append(f"• Month '{name}': days must be at least 1.")
+    def _save_eras(self, cid: str) -> None:
+        crud.delete_calendar_eras(cid)
+        for i in range(self._et.rowCount()):
+            n = self._et.item(i, 0).text().strip() if self._et.item(i, 0) else f"Era{i+1}"
+            ab = self._et.item(i, 1).text().strip() if self._et.item(i, 1) else n[:3]
+            sy = int(self._et.item(i, 2).data(Qt.ItemDataRole.DisplayRole) or 1) if self._et.item(i, 2) else 1
+            pr = self._et.cellWidget(i, 3).isChecked() if self._et.cellWidget(i, 3) and isinstance(self._et.cellWidget(i, 3), QCheckBox) else False
+            crud.create_calendar_era(CalendarEra(calendar_id=cid, name=n, abbreviation=ab, start_year=sy, is_primary=pr))
 
-        # Check weekdays
-        for i in range(self._weekdays_table.rowCount()):
-            name_item = self._weekdays_table.item(i, 0)
-            name = name_item.text().strip() if name_item else ""
-            if not name:
-                errors.append(f"• Weekday {i + 1}: name is required.")
+    def _save_leaps(self, cid: str) -> None:
+        crud.delete_leap_year_rules(cid)
+        for i in range(self._lt.rowCount()):
+            w = self._lt.cellWidget(i, 0)
+            rt = w.currentText() if w and isinstance(w, QComboBox) else "interval"
+            iv = int(self._lt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 4) if self._lt.item(i, 1) else 4
+            mo = int(self._lt.item(i, 2).data(Qt.ItemDataRole.DisplayRole) or 2) if self._lt.item(i, 2) else 2
+            da = int(self._lt.item(i, 3).data(Qt.ItemDataRole.DisplayRole) or 1) if self._lt.item(i, 3) else 1
+            ds = self._lt.item(i, 4).text().strip() if self._lt.item(i, 4) else ""
+            crud.create_leap_year_rule(LeapYearRule(calendar_id=cid, rule_type=rt, interval=iv, offset=0, month=mo, days_to_add=da, description=ds))
 
-        # Check eras
-        primary_count = 0
-        for i in range(self._eras_table.rowCount()):
-            name_item = self._eras_table.item(i, 0)
-            name = name_item.text().strip() if name_item else ""
-            if not name:
-                errors.append(f"• Era {i + 1}: name is required.")
-            abbr_item = self._eras_table.item(i, 1)
-            abbr = abbr_item.text().strip() if abbr_item else ""
-            if not abbr:
-                errors.append(f"• Era '{name}': abbreviation is required.")
-            widget = self._eras_table.cellWidget(i, 3)
-            if widget and isinstance(widget, QCheckBox) and widget.isChecked():
-                primary_count += 1
-        if self._eras_table.rowCount() > 0 and primary_count == 0:
-            errors.append("• At least one era must be marked as primary.")
-
-        # Check leap rules
-        for i in range(self._leap_table.rowCount()):
-            type_widget = self._leap_table.cellWidget(i, 0)
-            if type_widget and isinstance(type_widget, QComboBox):
-                rule_type = type_widget.currentText()
-                if rule_type not in ("interval", "exception"):
-                    errors.append(f"• Leap rule {i + 1}: invalid rule type.")
-
-            int_item = self._leap_table.item(i, 1)
-            interval = int(int_item.data(Qt.ItemDataRole.DisplayRole) or 0)
-            if interval <= 0:
-                errors.append(f"• Leap rule {i + 1}: interval must be positive.")
-
-            month_item = self._leap_table.item(i, 2)
-            month = int(month_item.data(Qt.ItemDataRole.DisplayRole) or 0)
-            if month < 1 or month > self._months_table.rowCount():
-                errors.append(f"• Leap rule {i + 1}: month {month} out of range.")
-
-        return errors
-
-    def _save_months(self, calendar_id: str) -> None:
-        crud.delete_calendar_months(calendar_id)
-        for i in range(self._months_table.rowCount()):
-            name_item = self._months_table.item(i, 0)
-            name = name_item.text().strip() if name_item else f"Month {i + 1}"
-            days_item = self._months_table.item(i, 1)
-            days = int(days_item.data(Qt.ItemDataRole.DisplayRole) or 30)
-            crud.create_calendar_month(CalendarMonth(
-                calendar_id=calendar_id, name=name, days=days, position=i + 1,
-            ))
-
-    def _save_weekdays(self, calendar_id: str) -> None:
-        crud.delete_calendar_weekdays(calendar_id)
-        for i in range(self._weekdays_table.rowCount()):
-            name_item = self._weekdays_table.item(i, 0)
-            name = name_item.text().strip() if name_item else f"Day {i + 1}"
-            crud.create_calendar_weekday(CalendarWeekday(
-                calendar_id=calendar_id, name=name, position=i + 1,
-            ))
-
-    def _save_eras(self, calendar_id: str) -> None:
-        crud.delete_calendar_eras(calendar_id)
-        for i in range(self._eras_table.rowCount()):
-            name_item = self._eras_table.item(i, 0)
-            name = name_item.text().strip() if name_item else f"Era {i + 1}"
-            abbr_item = self._eras_table.item(i, 1)
-            abbr = abbr_item.text().strip() if abbr_item else name[:3]
-            start_item = self._eras_table.item(i, 2)
-            start_year = int(start_item.data(Qt.ItemDataRole.DisplayRole) or 1)
-            primary = False
-            widget = self._eras_table.cellWidget(i, 3)
-            if widget and isinstance(widget, QCheckBox):
-                primary = widget.isChecked()
-            crud.create_calendar_era(CalendarEra(
-                calendar_id=calendar_id, name=name, abbreviation=abbr,
-                start_year=start_year, is_primary=primary,
-            ))
-
-    def _save_leap_rules(self, calendar_id: str) -> None:
-        crud.delete_leap_year_rules(calendar_id)
-        for i in range(self._leap_table.rowCount()):
-            type_widget = self._leap_table.cellWidget(i, 0)
-            rule_type = "interval"
-            if type_widget and isinstance(type_widget, QComboBox):
-                rule_type = type_widget.currentText()
-
-            int_item = self._leap_table.item(i, 1)
-            interval = int(int_item.data(Qt.ItemDataRole.DisplayRole) or 4)
-
-            month_item = self._leap_table.item(i, 2)
-            month = int(month_item.data(Qt.ItemDataRole.DisplayRole) or 2)
-
-            days_item = self._leap_table.item(i, 3)
-            days_to_add = int(days_item.data(Qt.ItemDataRole.DisplayRole) or 1)
-
-            desc_item = self._leap_table.item(i, 4)
-            description = desc_item.text().strip() if desc_item else ""
-
-            crud.create_leap_year_rule(LeapYearRule(
-                calendar_id=calendar_id, rule_type=rule_type,
-                interval=interval, offset=0,
-                month=month, days_to_add=days_to_add,
-                description=description,
-            ))
-
-    @Slot()
     def _on_revert(self) -> None:
-        if not self._current_calendar_id:
-            return
+        if not self._current_calendar_id: return
         cal = crud.get_calendar(self._current_calendar_id)
-        if not cal:
-            return
-        self._load_calendar(cal)
+        if cal: self._load(cal)
 
-    @Slot()
     def _on_close(self) -> None:
         if self._dirty:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes",
-                "You have unsaved changes. Save before closing?",
-                QMessageBox.StandardButton.Save |
-                QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel,
-            )
-            if reply == QMessageBox.StandardButton.Save:
-                self._on_save()
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return
+            r = QMessageBox.question(self, "Unsaved Changes", "Save before closing?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+            if r == QMessageBox.StandardButton.Save: self._on_save()
+            elif r == QMessageBox.StandardButton.Cancel: return
         self.accept()
 
     # ------------------------------------------------------------------
-    # Month CRUD
+    # Entity CRUD helpers
     # ------------------------------------------------------------------
 
-    @Slot()
     def _on_add_month(self) -> None:
-        row = self._months_table.rowCount()
-        self._months_table.insertRow(row)
-        self._months_table.setItem(row, 0, QTableWidgetItem("New Month"))
-        days_item = QTableWidgetItem()
-        days_item.setData(Qt.ItemDataRole.DisplayRole, 30)
-        self._months_table.setItem(row, 1, days_item)
-        remove_btn = QPushButton("🗑")
-        remove_btn.clicked.connect(lambda: self._remove_month_at(
-            self._months_table.indexAt(remove_btn.pos()).row()
-            if self._months_table.indexAt(remove_btn.pos()).isValid() else row
-        ))
-        self._months_table.setCellWidget(row, 2, remove_btn)
+        r = self._mt.rowCount(); self._mt.insertRow(r)
+        self._mt.setItem(r, 0, QTableWidgetItem("New Month"))
+        di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, 30); self._mt.setItem(r, 1, di)
+        b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_month(r)); self._mt.setCellWidget(r, 2, b)
         self._dirty = True
 
-    @Slot()
-    def _on_remove_month(self) -> None:
-        rows = set()
-        for item in self._months_table.selectedItems():
-            rows.add(item.row())
-        for row in sorted(rows, reverse=True):
-            self._remove_month_at(row)
+    def _on_rem_month(self) -> None:
+        for r in sorted({it.row() for it in self._mt.selectedItems()}, reverse=True): self._del_month(r)
 
-    def _remove_month_at(self, row: int) -> None:
-        if 0 <= row < self._months_table.rowCount():
-            self._months_table.removeRow(row)
-            self._dirty = True
+    def _del_month(self, r: int) -> None:
+        if 0 <= r < self._mt.rowCount(): self._mt.removeRow(r); self._dirty = True
 
-    # ------------------------------------------------------------------
-    # Weekday CRUD
-    # ------------------------------------------------------------------
-
-    @Slot()
-    def _on_add_weekday(self) -> None:
-        row = self._weekdays_table.rowCount()
-        self._weekdays_table.insertRow(row)
-        self._weekdays_table.setItem(row, 0, QTableWidgetItem("New Day"))
-        remove_btn = QPushButton("🗑")
-        remove_btn.clicked.connect(lambda: self._remove_weekday_at(
-            self._weekdays_table.indexAt(remove_btn.pos()).row()
-            if self._weekdays_table.indexAt(remove_btn.pos()).isValid() else row
-        ))
-        self._weekdays_table.setCellWidget(row, 1, remove_btn)
+    def _on_add_wd(self) -> None:
+        r = self._wt.rowCount(); self._wt.insertRow(r)
+        self._wt.setItem(r, 0, QTableWidgetItem("New Day"))
+        b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_wd(r)); self._wt.setCellWidget(r, 1, b)
         self._dirty = True
 
-    @Slot()
-    def _on_remove_weekday(self) -> None:
-        rows = set()
-        for item in self._weekdays_table.selectedItems():
-            rows.add(item.row())
-        for row in sorted(rows, reverse=True):
-            self._remove_weekday_at(row)
+    def _on_rem_wd(self) -> None:
+        for r in sorted({it.row() for it in self._wt.selectedItems()}, reverse=True): self._del_wd(r)
 
-    def _remove_weekday_at(self, row: int) -> None:
-        if 0 <= row < self._weekdays_table.rowCount():
-            self._weekdays_table.removeRow(row)
-            self._dirty = True
+    def _del_wd(self, r: int) -> None:
+        if 0 <= r < self._wt.rowCount(): self._wt.removeRow(r); self._dirty = True
 
-    # ------------------------------------------------------------------
-    # Era CRUD
-    # ------------------------------------------------------------------
-
-    @Slot()
     def _on_add_era(self) -> None:
-        row = self._eras_table.rowCount()
-        self._eras_table.insertRow(row)
-        self._eras_table.setItem(row, 0, QTableWidgetItem("New Era"))
-        self._eras_table.setItem(row, 1, QTableWidgetItem("NE"))
-        year_item = QTableWidgetItem()
-        year_item.setData(Qt.ItemDataRole.DisplayRole, 1)
-        self._eras_table.setItem(row, 2, year_item)
-        cb = QCheckBox()
-        self._eras_table.setCellWidget(row, 3, cb)
-        remove_btn = QPushButton("🗑")
-        self._eras_table.setCellWidget(row, 4, remove_btn)
+        r = self._et.rowCount(); self._et.insertRow(r)
+        self._et.setItem(r, 0, QTableWidgetItem("New Era"))
+        self._et.setItem(r, 1, QTableWidgetItem("NE"))
+        yi = QTableWidgetItem(); yi.setData(Qt.ItemDataRole.DisplayRole, 1); self._et.setItem(r, 2, yi)
+        self._et.setCellWidget(r, 3, QCheckBox())
+        b = QPushButton("🗑"); self._et.setCellWidget(r, 4, b)
         self._dirty = True
 
-    @Slot()
-    def _on_remove_era(self) -> None:
-        rows = set()
-        for item in self._eras_table.selectedItems():
-            rows.add(item.row())
-        for row in sorted(rows, reverse=True):
-            self._remove_era_at(row)
+    def _on_rem_era(self) -> None:
+        for r in sorted({it.row() for it in self._et.selectedItems()}, reverse=True): self._del_era(r)
 
-    def _remove_era_at(self, row: int) -> None:
-        if 0 <= row < self._eras_table.rowCount():
-            self._eras_table.removeRow(row)
-            self._dirty = True
+    def _del_era(self, r: int) -> None:
+        if 0 <= r < self._et.rowCount(): self._et.removeRow(r); self._dirty = True
 
-    # ------------------------------------------------------------------
-    # Leap rule CRUD
-    # ------------------------------------------------------------------
-
-    @Slot()
-    def _on_add_leap_rule(self) -> None:
-        row = self._leap_table.rowCount()
-        self._leap_table.insertRow(row)
-
-        type_combo = QComboBox()
-        type_combo.addItems(["interval", "exception"])
-        self._leap_table.setCellWidget(row, 0, type_combo)
-
-        int_item = QTableWidgetItem()
-        int_item.setData(Qt.ItemDataRole.DisplayRole, 4)
-        self._leap_table.setItem(row, 1, int_item)
-
-        month_item = QTableWidgetItem()
-        month_item.setData(Qt.ItemDataRole.DisplayRole, 2)
-        self._leap_table.setItem(row, 2, month_item)
-
-        days_item = QTableWidgetItem()
-        days_item.setData(Qt.ItemDataRole.DisplayRole, 1)
-        self._leap_table.setItem(row, 3, days_item)
-
-        self._leap_table.setItem(row, 4, QTableWidgetItem(""))
-
-        remove_btn = QPushButton("🗑")
-        self._leap_table.setCellWidget(row, 5, remove_btn)
+    def _on_add_leap(self) -> None:
+        r = self._lt.rowCount(); self._lt.insertRow(r)
+        tc = QComboBox(); tc.addItems(["interval", "exception"]); self._lt.setCellWidget(r, 0, tc)
+        for c, v in [(1, 4), (2, 2), (3, 1)]:
+            it = QTableWidgetItem(); it.setData(Qt.ItemDataRole.DisplayRole, v); self._lt.setItem(r, c, it)
+        self._lt.setItem(r, 4, QTableWidgetItem(""))
+        b = QPushButton("🗑"); self._lt.setCellWidget(r, 5, b)
         self._dirty = True
 
-    @Slot()
-    def _on_remove_leap_rule(self) -> None:
-        rows = set()
-        for item in self._leap_table.selectedItems():
-            rows.add(item.row())
-        for row in sorted(rows, reverse=True):
-            self._remove_leap_at(row)
+    def _on_rem_leap(self) -> None:
+        for r in sorted({it.row() for it in self._lt.selectedItems()}, reverse=True): self._del_leap(r)
 
-    def _remove_leap_at(self, row: int) -> None:
-        if 0 <= row < self._leap_table.rowCount():
-            self._leap_table.removeRow(row)
-            self._dirty = True
+    def _del_leap(self, r: int) -> None:
+        if 0 <= r < self._lt.rowCount(): self._lt.removeRow(r); self._dirty = True
 
-    @Slot()
-    def _on_verify_leap_rules(self) -> None:
-        if not self._current_calendar_id:
-            return
-        engine = CalendarEngine(self._current_calendar_id)
-        result = engine.verify_leap_rules()
-        if result["valid"] and not result["warnings"]:
-            QMessageBox.information(self, "Leap Rule Verification",
-                                    "All leap rules are valid.")
-        elif result["valid"]:
-            msg = "Leap rules are valid with warnings:\n\n" + "\n".join(result["warnings"])
-            QMessageBox.warning(self, "Leap Rule Verification", msg)
+    def _on_verify(self) -> None:
+        if not self._current_calendar_id: return
+        res = CalendarEngine(self._current_calendar_id).verify_leap_rules()
+        if res["valid"] and not res["warnings"]:
+            QMessageBox.information(self, "Verify", "All leap rules valid.")
+        elif res["valid"]:
+            QMessageBox.warning(self, "Verify", "Warnings:\n" + "\n".join(res["warnings"]))
         else:
-            msg = "Leap rules have errors:\n\n"
-            msg += "\n".join(result["errors"])
-            if result["warnings"]:
-                msg += "\n\nWarnings:\n" + "\n".join(result["warnings"])
-            QMessageBox.warning(self, "Leap Rule Verification", msg)
+            m = "Errors:\n" + "\n".join(res["errors"])
+            if res["warnings"]: m += "\n\nWarnings:\n" + "\n".join(res["warnings"])
+            QMessageBox.warning(self, "Verify", m)
 
-    # ------------------------------------------------------------------
-    # Close event
-    # ------------------------------------------------------------------
+    def _mark_dirty(self, *_: Any) -> None: self._dirty = True
 
     def closeEvent(self, event: Any) -> None:
         if self._dirty:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes",
-                "You have unsaved changes. Save before closing?",
-                QMessageBox.StandardButton.Save |
-                QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel,
-            )
-            if reply == QMessageBox.StandardButton.Save:
-                self._on_save()
-                event.accept()
-            elif reply == QMessageBox.StandardButton.Discard:
-                event.accept()
-            else:
-                event.ignore()
-        else:
-            event.accept()
+            r = QMessageBox.question(self, "Unsaved Changes", "Save before closing?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+            if r == QMessageBox.StandardButton.Save: self._on_save()
+            elif r == QMessageBox.StandardButton.Cancel: event.ignore(); return
+        event.accept()
