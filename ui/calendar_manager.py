@@ -374,7 +374,7 @@ class CalendarManagerDialog(QDialog):
         self._load_weekdays(cal.id)
         self._load_eras(cal.id)
         self._load_leaps(cal.id)
-        self._viewer.set_calendar(cal.id)
+        self._refresh_viewer()
 
     def _load_months(self, cid: str) -> None:
         months = sorted(crud.list_calendar_months(cid), key=lambda m: m.position)
@@ -425,6 +425,59 @@ class CalendarManagerDialog(QDialog):
 
     # ------------------------------------------------------------------
     # Calendar CRUD
+
+    def _refresh_viewer(self) -> None:
+        """Collect in-memory table data and push to the CalendarViewer."""
+        months = self._collect_months_data()
+        weekdays = self._collect_weekdays_data()
+        eras = self._collect_eras_data()
+        leaps = self._collect_leap_data()
+        cal = Calendar(name=self._edit_name.text().strip(), epoch=self._edit_epoch.text().strip(),
+                       description=self._edit_desc.toPlainText().strip())
+        if self._current_calendar_id:
+            cal.id = self._current_calendar_id
+        self._viewer.set_calendar_data(months, weekdays, eras, leaps, cal)
+
+    def _collect_months_data(self) -> list:
+        from database.models import CalendarMonth
+        result = []
+        for i in range(self._mt.rowCount()):
+            name = self._mt.item(i, 0).text().strip() if self._mt.item(i, 0) else f"M{i+1}"
+            days = int(self._mt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 30) if self._mt.item(i, 1) else 30
+            result.append(CalendarMonth(name=name, days=days, position=i + 1))
+        return result
+
+    def _collect_weekdays_data(self) -> list:
+        from database.models import CalendarWeekday
+        result = []
+        for i in range(self._wt.rowCount()):
+            name = self._wt.item(i, 0).text().strip() if self._wt.item(i, 0) else f"D{i+1}"
+            result.append(CalendarWeekday(name=name, position=i + 1))
+        return result
+
+    def _collect_eras_data(self) -> list:
+        from database.models import CalendarEra
+        result = []
+        for i in range(self._et.rowCount()):
+            name = self._et.item(i, 0).text().strip() if self._et.item(i, 0) else f"Era{i+1}"
+            abbr = self._et.item(i, 1).text().strip() if self._et.item(i, 1) else name[:3]
+            sy = int(self._et.item(i, 2).data(Qt.ItemDataRole.DisplayRole) or 1) if self._et.item(i, 2) else 1
+            pr = self._et.cellWidget(i, 3).isChecked() if self._et.cellWidget(i, 3) and isinstance(self._et.cellWidget(i, 3), QCheckBox) else False
+            result.append(CalendarEra(name=name, abbreviation=abbr, start_year=sy, is_primary=pr))
+        return result
+
+    def _collect_leap_data(self) -> list:
+        from database.models import LeapYearRule
+        result = []
+        for i in range(self._lt.rowCount()):
+            w = self._lt.cellWidget(i, 0)
+            rt = w.currentText() if w and isinstance(w, QComboBox) else "interval"
+            iv = int(self._lt.item(i, 1).data(Qt.ItemDataRole.DisplayRole) or 4) if self._lt.item(i, 1) else 4
+            mo = int(self._lt.item(i, 2).data(Qt.ItemDataRole.DisplayRole) or 2) if self._lt.item(i, 2) else 2
+            da = int(self._lt.item(i, 3).data(Qt.ItemDataRole.DisplayRole) or 1) if self._lt.item(i, 3) else 1
+            ds = self._lt.item(i, 4).text().strip() if self._lt.item(i, 4) else ""
+            result.append(LeapYearRule(rule_type=rt, interval=iv, offset=0, month=mo, days_to_add=da, description=ds))
+        return result
     # ------------------------------------------------------------------
 
     def _on_add(self) -> None:
@@ -622,25 +675,25 @@ class CalendarManagerDialog(QDialog):
         self._mt.setItem(r, 0, QTableWidgetItem("New Month"))
         di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, 30); self._mt.setItem(r, 1, di)
         b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_month(r)); self._mt.setCellWidget(r, 2, b)
-        self._dirty = True
+        self._dirty = True; self._refresh_viewer()
 
     def _on_rem_month(self) -> None:
         for r in sorted({it.row() for it in self._mt.selectedItems()}, reverse=True): self._del_month(r)
 
     def _del_month(self, r: int) -> None:
-        if 0 <= r < self._mt.rowCount(): self._mt.removeRow(r); self._dirty = True
+        if 0 <= r < self._mt.rowCount(): self._mt.removeRow(r); self._dirty = True; self._refresh_viewer(); self._refresh_viewer()
 
     def _on_add_wd(self) -> None:
         r = self._wt.rowCount(); self._wt.insertRow(r)
         self._wt.setItem(r, 0, QTableWidgetItem("New Day"))
         b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_wd(r)); self._wt.setCellWidget(r, 1, b)
-        self._dirty = True
+        self._dirty = True; self._refresh_viewer()
 
     def _on_rem_wd(self) -> None:
         for r in sorted({it.row() for it in self._wt.selectedItems()}, reverse=True): self._del_wd(r)
 
     def _del_wd(self, r: int) -> None:
-        if 0 <= r < self._wt.rowCount(): self._wt.removeRow(r); self._dirty = True
+        if 0 <= r < self._wt.rowCount(): self._wt.removeRow(r); self._dirty = True; self._refresh_viewer(); self._refresh_viewer()
 
     def _on_add_era(self) -> None:
         r = self._et.rowCount(); self._et.insertRow(r)
@@ -649,13 +702,13 @@ class CalendarManagerDialog(QDialog):
         yi = QTableWidgetItem(); yi.setData(Qt.ItemDataRole.DisplayRole, 1); self._et.setItem(r, 2, yi)
         self._et.setCellWidget(r, 3, QCheckBox())
         b = QPushButton("🗑"); self._et.setCellWidget(r, 4, b)
-        self._dirty = True
+        self._dirty = True; self._refresh_viewer()
 
     def _on_rem_era(self) -> None:
         for r in sorted({it.row() for it in self._et.selectedItems()}, reverse=True): self._del_era(r)
 
     def _del_era(self, r: int) -> None:
-        if 0 <= r < self._et.rowCount(): self._et.removeRow(r); self._dirty = True
+        if 0 <= r < self._et.rowCount(): self._et.removeRow(r); self._dirty = True; self._refresh_viewer(); self._refresh_viewer()
 
     def _on_add_leap(self) -> None:
         r = self._lt.rowCount(); self._lt.insertRow(r)
@@ -664,13 +717,13 @@ class CalendarManagerDialog(QDialog):
             it = QTableWidgetItem(); it.setData(Qt.ItemDataRole.DisplayRole, v); self._lt.setItem(r, c, it)
         self._lt.setItem(r, 4, QTableWidgetItem(""))
         b = QPushButton("🗑"); self._lt.setCellWidget(r, 5, b)
-        self._dirty = True
+        self._dirty = True; self._refresh_viewer()
 
     def _on_rem_leap(self) -> None:
         for r in sorted({it.row() for it in self._lt.selectedItems()}, reverse=True): self._del_leap(r)
 
     def _del_leap(self, r: int) -> None:
-        if 0 <= r < self._lt.rowCount(): self._lt.removeRow(r); self._dirty = True
+        if 0 <= r < self._lt.rowCount(): self._lt.removeRow(r); self._dirty = True; self._refresh_viewer(); self._refresh_viewer()
 
     def _on_verify(self) -> None:
         if not self._current_calendar_id: return
@@ -684,7 +737,9 @@ class CalendarManagerDialog(QDialog):
             if res["warnings"]: m += "\n\nWarnings:\n" + "\n".join(res["warnings"])
             QMessageBox.warning(self, "Verify", m)
 
-    def _mark_dirty(self, *_: Any) -> None: self._dirty = True
+    def _mark_dirty(self, *_: Any) -> None:
+        self._dirty = True; self._refresh_viewer()
+        self._refresh_viewer()
 
     def closeEvent(self, event: Any) -> None:
         if self._dirty:

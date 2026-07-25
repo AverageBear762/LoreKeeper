@@ -1,16 +1,20 @@
 """
 World Garden — CalendarViewer Widget.
 
-A reusable QWidget that renders a live month-by-month calendar grid
-for any calendar loaded from the database, with prev/next year navigation.
+A reusable QWidget that renders a single-month calendar grid for any
+custom calendar configuration. Accepts raw data (months, weekdays,
+eras, leap rules) — no DB connection required — so it can show
+live, unsaved previews.
 
-Adapts to any custom month structure, weekday definitions, leap year rules,
-and era-based year display.
-
-Usage:
-    viewer = CalendarViewer()
-    viewer.set_calendar(calendar_id)
+API:
+    viewer.set_calendar_data(months, weekdays, eras, leap_rules, calendar)
     viewer.set_year(2024)
+    viewer.set_month(0)
+    viewer.goto_prev_month() / goto_next_month()
+    viewer.goto_prev_year() / goto_next_year()
+
+Signals:
+    date_clicked(int) — emits absolute_day of clicked day cell
 """
 
 from __future__ import annotations
@@ -23,153 +27,248 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from database.calendar_engine import CalendarEngine
+from database.models import Calendar, CalendarMonth, CalendarWeekday, CalendarEra, LeapYearRule
 
 
 class CalendarViewer(QWidget):
-    """Renders a scrollable, month-by-month calendar grid for any calendar."""
+    """Single-month calendar grid viewer. Adapts to any calendar structure."""
 
-    year_changed = Signal(int)           # emitted when the displayed year changes
-    date_clicked = Signal(int)           # emitted with absolute_day when a day is clicked
-    calendar_loaded = Signal(str)        # emitted with calendar_id after successful load
+    date_clicked = Signal(int)  # absolute_day
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
-        self._engine: Optional[CalendarEngine] = None
+        self._engine = CalendarEngine()
         self._year: int = 1
+        self._month_index: int = 0  # 0-based index into months list
+        self._has_data: bool = False
 
         self._build_ui()
 
     # ------------------------------------------------------------------
-    # UI construction
+    # UI
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
         main = QVBoxLayout(self)
-        main.setContentsMargins(0, 0, 0, 0)
+        main.setContentsMargins(4, 4, 4, 4)
+        main.setSpacing(4)
 
-        # -- Navigation bar --
+        # ------- Navigation bar: ◀ year spinner ▶ | ◀◀ month ◀▶ ▶▶ -------
         nav = QHBoxLayout()
 
-        self._btn_prev = QPushButton("◀")
-        self._btn_prev.setFixedWidth(40)
-        self._btn_prev.clicked.connect(self.prev_year)
-        nav.addWidget(self._btn_prev)
+        self._btn_prev_year = QPushButton("◀◀")
+        self._btn_prev_year.setFixedWidth(36)
+        self._btn_prev_year.setToolTip("Previous year")
+        self._btn_prev_year.clicked.connect(self.goto_prev_year)
+        nav.addWidget(self._btn_prev_year)
 
-        self._lbl_year = QLabel("No calendar loaded")
-        self._lbl_year.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_year.setStyleSheet("font-size: 16px; font-weight: bold;")
-        nav.addWidget(self._lbl_year, stretch=1)
+        self._year_spin = QSpinBox()
+        self._year_spin.setRange(-999999, 999999)
+        self._year_spin.setValue(1)
+        self._year_spin.setToolTip("Year (astronomical)")
+        self._year_spin.valueChanged.connect(self._on_year_spin)
+        nav.addWidget(self._year_spin)
 
-        self._btn_next = QPushButton("▶")
-        self._btn_next.setFixedWidth(40)
-        self._btn_next.clicked.connect(self.next_year)
-        nav.addWidget(self._btn_next)
+        self._btn_next_year = QPushButton("▶▶")
+        self._btn_next_year.setFixedWidth(36)
+        self._btn_next_year.setToolTip("Next year")
+        self._btn_next_year.clicked.connect(self.goto_next_year)
+        nav.addWidget(self._btn_next_year)
+
+        nav.addSpacing(12)
+
+        self._btn_prev_month = QPushButton("◀")
+        self._btn_prev_month.setFixedWidth(30)
+        self._btn_prev_month.setToolTip("Previous month")
+        self._btn_prev_month.clicked.connect(self.goto_prev_month)
+        nav.addWidget(self._btn_prev_month)
+
+        self._lbl_month = QLabel("—")
+        self._lbl_month.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_month.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self._lbl_month.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        nav.addWidget(self._lbl_month, stretch=1)
+
+        self._btn_next_month = QPushButton("▶")
+        self._btn_next_month.setFixedWidth(30)
+        self._btn_next_month.setToolTip("Next month")
+        self._btn_next_month.clicked.connect(self.goto_next_month)
+        nav.addWidget(self._btn_next_month)
 
         main.addLayout(nav)
 
-        # -- Scrollable grid area --
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # ------- Era-formatted year label -------
+        self._lbl_era = QLabel("")
+        self._lbl_era.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_era.setStyleSheet("font-size: 12px; color: gray; font-style: italic;")
+        main.addWidget(self._lbl_era)
 
-        self._grid_container = QWidget()
-        self._grid = QGridLayout(self._grid_container)
-        self._grid.setSpacing(3)
-        scroll.setWidget(self._grid_container)
+        # ------- Grid -------
+        self._grid = QGridLayout()
+        self._grid.setSpacing(1)
+        main.addLayout(self._grid)
 
-        main.addWidget(scroll, stretch=1)
+        main.addStretch()
 
-        # Status label for errors
-        self._lbl_status = QLabel("")
-        self._lbl_status.setStyleSheet("color: gray; font-style: italic; padding: 4px;")
-        self._lbl_status.setVisible(False)
+        # ------- Status -------
+        self._lbl_status = QLabel("No calendar data loaded")
+        self._lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_status.setStyleSheet("color: gray; padding: 20px;")
         main.addWidget(self._lbl_status)
-
-        self.setMinimumHeight(200)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def set_calendar(self, calendar_id: str) -> None:
-        """Load a calendar by ID and render it at the current year."""
-        try:
-            self._engine = CalendarEngine(calendar_id)
-        except Exception:
-            self._show_error(f"Failed to load calendar")
+    def set_calendar_data(
+        self,
+        months: list[CalendarMonth],
+        weekdays: list[CalendarWeekday],
+        eras: list[CalendarEra],
+        leap_rules: list[LeapYearRule],
+        calendar: Optional[Calendar] = None,
+    ) -> None:
+        """Load raw calendar configuration without a DB connection."""
+        self._engine.load_from_data(months, weekdays, eras, leap_rules, calendar)
+        self._has_data = bool(months)
+
+        if not months:
+            self._show_status("No months defined")
             return
 
-        if not self._engine.calendar:
-            self._show_error("Calendar not found")
-            return
+        # Clamp month index
+        if self._month_index >= len(months):
+            self._month_index = 0
 
         self._lbl_status.setVisible(False)
-        self.calendar_loaded.emit(calendar_id)
-        self.render()
+        self._render()
 
     def set_year(self, year: int) -> None:
-        """Navigate to a specific year and re-render."""
         self._year = year
-        if self._engine and self._engine.calendar:
-            self.render()
-            self.year_changed.emit(year)
+        self._year_spin.blockSignals(True)
+        self._year_spin.setValue(year)
+        self._year_spin.blockSignals(False)
+        if self._has_data:
+            self._render()
 
-    def prev_year(self) -> None:
-        """Move to the previous year."""
-        self.set_year(self._year - 1)
+    def set_month(self, month_index: int) -> None:
+        months = self._engine.months
+        if not months:
+            return
+        self._month_index = max(0, min(month_index, len(months) - 1))
+        if self._has_data:
+            self._render()
 
-    def next_year(self) -> None:
-        """Move to the next year."""
-        self.set_year(self._year + 1)
+    def goto_prev_month(self) -> None:
+        months = self._engine.months
+        if not months:
+            return
+        self._month_index = (self._month_index - 1) % len(months)
+        if self._month_index == len(months) - 1:
+            self._year -= 1
+            self._year_spin.blockSignals(True)
+            self._year_spin.setValue(self._year)
+            self._year_spin.blockSignals(False)
+        if self._has_data:
+            self._render()
+
+    def goto_next_month(self) -> None:
+        months = self._engine.months
+        if not months:
+            return
+        self._month_index = (self._month_index + 1) % len(months)
+        if self._month_index == 0:
+            self._year += 1
+            self._year_spin.blockSignals(True)
+            self._year_spin.setValue(self._year)
+            self._year_spin.blockSignals(False)
+        if self._has_data:
+            self._render()
+
+    def goto_prev_year(self) -> None:
+        self._year -= 1
+        self._year_spin.blockSignals(True)
+        self._year_spin.setValue(self._year)
+        self._year_spin.blockSignals(False)
+        if self._has_data:
+            self._render()
+
+    def goto_next_year(self) -> None:
+        self._year += 1
+        self._year_spin.blockSignals(True)
+        self._year_spin.setValue(self._year)
+        self._year_spin.blockSignals(False)
+        if self._has_data:
+            self._render()
 
     @property
     def year(self) -> int:
         return self._year
 
     @property
+    def month_index(self) -> int:
+        return self._month_index
+
+    @property
     def is_loaded(self) -> bool:
-        return self._engine is not None and self._engine.calendar is not None
+        return self._has_data
 
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
 
-    def render(self) -> None:
-        """Render the full year calendar grid."""
-        if not self._engine or not self._engine.months:
-            self._show_error("No months defined")
+    def _on_year_spin(self, value: int) -> None:
+        self._year = value
+        if self._has_data:
+            self._render()
+
+    def _render(self) -> None:
+        """Render the current month as a grid."""
+        months = self._engine.months
+        if not months or self._month_index >= len(months):
             return
 
-        # Clear grid
+        # Clear old grid
         while self._grid.count():
             item = self._grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        year = self._year
-        months = self._engine.months
+        month = months[self._month_index]
         weekdays = self._engine.weekdays
-        leap_rules = self._engine.leap_rules
         nwd = len(weekdays) if weekdays else 7
 
-        self._render_header_row(weekdays, nwd)
+        # Days in this month (with leap rules)
+        md = month.days
+        for rule in self._engine.leap_rules:
+            if rule.month == self._month_index + 1 and self._engine.is_leap_affected(rule, self._year):
+                md += rule.days_to_add
 
-        row = 1
-        for mi, month in enumerate(months):
-            row = self._render_month(mi, month, year, weekdays, leap_rules, nwd, row)
+        # Month label
+        self._lbl_month.setText(f"{month.name} ({md} days)")
 
-        # Year label
-        self._update_year_label(year)
-        self._lbl_status.setVisible(False)
+        # Era label
+        self._lbl_era.setText("")
+        if self._engine.eras:
+            era = None
+            for e in self._engine.eras:
+                if e.start_year <= self._year:
+                    era = e
+            if era is None and self._engine.eras:
+                era = self._engine.eras[0]
+            if era:
+                ey = self._year - era.start_year + 1 if era.is_primary else era.start_year - self._year + 1
+                self._lbl_era.setText(f"{ey} {era.abbreviation}")
 
-    def _render_header_row(self, weekdays, nwd: int) -> None:
+        # Weekday headers (row 0)
         if weekdays:
             for c, wd in enumerate(weekdays):
                 lbl = QLabel(wd.name[:3])
@@ -177,89 +276,53 @@ class CalendarViewer(QWidget):
                 lbl.setStyleSheet("font-weight: bold; padding: 3px; background-color: palette(alternate-base);")
                 self._grid.addWidget(lbl, 0, c)
 
-    def _render_month(
-        self, mi: int, month, year: int, weekdays, leap_rules, nwd: int, start_row: int,
-    ) -> int:
-        """Render one month block. Returns next available row."""
-        # Month header
-        md = month.days
-        for rule in leap_rules:
-            if rule.month == mi + 1 and self._engine.is_leap_affected(rule, year):
-                md += rule.days_to_add
-
-        hdr = QLabel(f"<b>{month.name} ({md})</b>")
-        hdr.setStyleSheet("background-color: palette(alternate-base); padding: 3px; margin-top: 6px;")
-        self._grid.addWidget(hdr, start_row, 0, 1, nwd)
-        start_row += 1
-
         # First-day offset
         try:
-            woff = self._engine.date_to_absolute_day(year, mi + 1, 1) % nwd
+            woff = self._engine.date_to_absolute_day(self._year, self._month_index + 1, 1) % nwd
         except Exception:
             woff = 0
 
-        # Day cells
+        # Day grid
         day = 1
         rows_needed = ((woff + md) + nwd - 1) // nwd if nwd > 0 else md
-        for rr in range(rows_needed):
-            for cc in range(nwd):
-                if rr == 0 and cc < woff:
-                    self._grid.addWidget(QLabel(""), start_row + rr, cc)
+        for r in range(rows_needed):
+            for c in range(nwd):
+                grid_row = r + 1  # row 0 is header
+                if r == 0 and c < woff:
+                    self._grid.addWidget(QLabel(""), grid_row, c)
                 elif day <= md:
-                    self._render_day_cell(mi, month, year, day, start_row + rr, cc)
+                    self._render_day_cell(month, day, grid_row, c, md)
                     day += 1
                 else:
-                    self._grid.addWidget(QLabel(""), start_row + rr, cc)
+                    self._grid.addWidget(QLabel(""), grid_row, c)
 
-        return start_row + rows_needed + 1  # +1 gap between months
+    def _render_day_cell(self, month: CalendarMonth, day: int, r: int, c: int, total_days: int) -> None:
+        """Render a clickable day cell."""
+        # Determine if this is a leap day
+        is_leap = day > month.days  # extra days beyond base month length are leap days
 
-    def _render_day_cell(self, mi: int, month, year: int, day: int, r: int, c: int) -> None:
-        """Render a single day cell with leap-day highlighting."""
-        is_leap = False
-        for rule in self._engine.leap_rules:
-            if (rule.month == mi + 1 and
-                self._engine.is_leap_affected(rule, year) and
-                    day > self._engine.months[mi].days):
-                is_leap = True
-
-        # Create clickable label
         btn = QPushButton(str(day))
         btn.setFlat(True)
-        btn.setFixedSize(28, 24)
+        btn.setFixedSize(32, 26)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         if is_leap:
-            btn.setStyleSheet("color: #0d6efd; font-weight: bold; border: none; padding: 0px;")
+            btn.setStyleSheet("color: #0d6efd; font-weight: bold; border: 1px solid #0d6efd; border-radius: 2px; padding: 0px;")
         else:
             btn.setStyleSheet("border: none; padding: 0px;")
 
-        # Connect click signal
-        abs_day = self._engine.date_to_absolute_day(year, mi + 1, day)
+        # Emit date_clicked with absolute_day
+        abs_day = self._engine.date_to_absolute_day(self._year, self._month_index + 1, day)
         btn.clicked.connect(lambda checked=False, ad=abs_day: self.date_clicked.emit(ad))
 
-        # Tooltip
+        # Tooltip: absolute day + formatted date
         fmt = self._engine.format_date(abs_day)
-        btn.setToolTip(fmt)
+        btn.setToolTip(f"Day {abs_day} — {fmt}")
 
         self._grid.addWidget(btn, r, c)
 
-    def _update_year_label(self, year: int) -> None:
-        """Set the year label with era formatting."""
-        if self._engine and self._engine.eras:
-            era = None
-            for e in self._engine.eras:
-                if e.start_year <= year:
-                    era = e
-            if era is None and self._engine.eras:
-                era = self._engine.eras[0]
-            if era:
-                ey = year - era.start_year + 1 if era.is_primary else era.start_year - year + 1
-                self._lbl_year.setText(f"Year {ey} {era.abbreviation}")
-                return
-        self._lbl_year.setText(f"Year {year}")
-
-    def _show_error(self, msg: str) -> None:
-        """Show an error message in the status area."""
+    def _show_status(self, msg: str) -> None:
         self._lbl_status.setText(msg)
         self._lbl_status.setVisible(True)
-        self._lbl_year.setText("—")
+        self._lbl_month.setText("—")
+        self._lbl_era.setText("")

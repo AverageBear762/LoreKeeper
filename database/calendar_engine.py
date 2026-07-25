@@ -86,6 +86,26 @@ class CalendarEngine:
         self._eras.sort(key=lambda e: e.start_year)
         return True
 
+    def load_from_data(
+        self,
+        months: list[CalendarMonth],
+        weekdays: list[CalendarWeekday],
+        eras: list[CalendarEra],
+        leap_rules: list[LeapYearRule],
+        calendar: Optional[Calendar] = None,
+    ) -> None:
+        """Load calendar configuration directly from in-memory data.
+
+        No database connection required. Useful for live previews that
+        render unsaved changes without writing to the database.
+        """
+        self._calendar = calendar
+        self._calendar_id = calendar.id if calendar else None
+        self._months = sorted(months, key=lambda m: m.position)
+        self._weekdays = sorted(weekdays, key=lambda w: w.position)
+        self._eras = sorted(eras, key=lambda e: e.start_year)
+        self._leap_rules = list(leap_rules)
+
     def save(self) -> None:
         """Save the current calendar and all its data to the database."""
         if self._calendar:
