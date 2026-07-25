@@ -12,6 +12,7 @@ from ui.search_dialog import SearchDialog
 from ui.link_autocomplete import WikiLinkCompleter, LinkAutocompletePopup
 from ui.backup_manager import BackupManager, export_json_dialog, import_json_dialog, backup_database_dialog
 from ui.calendar_manager import CalendarManagerDialog
+from ui.calendar_viewer import CalendarViewer
 
 __all__ = [
     "MainWindow",
@@ -40,4 +41,5 @@ __all__ = [
     "import_json_dialog",
     "backup_database_dialog",
     "CalendarManagerDialog",
+    "CalendarViewer",
 ]

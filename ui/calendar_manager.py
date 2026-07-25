@@ -45,6 +45,7 @@ from database.calendar_engine import CalendarEngine
 from database.models import (
     Calendar, CalendarMonth, CalendarWeekday, CalendarEra, LeapYearRule, _now,
 )
+from ui.calendar_viewer import CalendarViewer
 
 DEFAULT_CALENDAR_PATH = Path.home() / ".worldgarden" / "default_calendar.json"
 
@@ -104,7 +105,6 @@ class CalendarManagerDialog(QDialog):
         self._current_calendar_id: Optional[str] = None
         self._dirty: bool = False
         self._default_cal_id: Optional[str] = _get_default_calendar_id()
-        self._preview_year: int = 1
 
         self._build_ui()
         self._refresh_calendar_list()
@@ -302,22 +302,8 @@ class CalendarManagerDialog(QDialog):
     def _build_preview_tab(self) -> None:
         t = QWidget()
         l = QVBoxLayout(t)
-        nav = QHBoxLayout()
-        self._bpr = QPushButton("◀")
-        self._bpr.clicked.connect(lambda: self._shift_preview(-1))
-        nav.addWidget(self._bpr)
-        self._lbl_yr = QLabel("Year 1")
-        self._lbl_yr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_yr.setStyleSheet("font-size: 16px; font-weight: bold;")
-        nav.addWidget(self._lbl_yr, stretch=1)
-        self._bnx = QPushButton("▶")
-        self._bnx.clicked.connect(lambda: self._shift_preview(1))
-        nav.addWidget(self._bnx)
-        l.addLayout(nav)
-        self._pg = QGridLayout()
-        self._pg.setSpacing(2)
-        l.addLayout(self._pg)
-        l.addStretch()
+        self._viewer = CalendarViewer()
+        l.addWidget(self._viewer)
         self._tabs.addTab(t, "Preview")
 
     # ------------------------------------------------------------------
@@ -388,7 +374,7 @@ class CalendarManagerDialog(QDialog):
         self._load_weekdays(cal.id)
         self._load_eras(cal.id)
         self._load_leaps(cal.id)
-        self._load_preview(cal.id)
+        self._viewer.set_calendar(cal.id)
 
     def _load_months(self, cid: str) -> None:
         months = sorted(crud.list_calendar_months(cid), key=lambda m: m.position)
@@ -436,92 +422,6 @@ class CalendarManagerDialog(QDialog):
             self._lt.setItem(i, 4, QTableWidgetItem(r.description))
             b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_leap(r))
             self._lt.setCellWidget(i, 5, b)
-
-    # ------------------------------------------------------------------
-    # Preview
-    # ------------------------------------------------------------------
-
-    def _load_preview(self, cid: str) -> None:
-        while self._pg.count():
-            w = self._pg.takeAt(0)
-            if w.widget(): w.widget().deleteLater()
-
-        try:
-            eng = CalendarEngine(cid)
-        except Exception:
-            self._lbl_yr.setText("(Invalid calendar config)")
-            return
-        if not eng.months:
-            self._lbl_yr.setText("(No months)")
-            return
-
-        year = self._preview_year
-        wds = eng.weekdays
-        nwd = len(wds) if wds else 7
-        # Weekday header
-        if wds:
-            for c, wd in enumerate(wds):
-                lbl = QLabel(wd.name[:3]); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lbl.setStyleSheet("font-weight: bold; padding: 2px;")
-                self._pg.addWidget(lbl, 0, c)
-
-        ro = 1
-        for mi, mo in enumerate(eng.months):
-            md = mo.days
-            for r in eng.leap_rules:
-                if r.month == mi + 1 and eng.is_leap_affected(r, year):
-                    md += r.days_to_add
-            hdr = QLabel(f"<b>{mo.name} ({md})</b>")
-            hdr.setStyleSheet("background-color: palette(alternate-base); padding: 2px;")
-            self._pg.addWidget(hdr, ro, 0, 1, nwd)
-            ro += 1
-
-            try:
-                woff = eng.date_to_absolute_day(year, mi + 1, 1) % nwd
-            except Exception:
-                woff = 0
-
-            day = 1
-            rn = ((woff + md) + nwd - 1) // nwd
-            for rr in range(rn):
-                for cc in range(nwd):
-                    if rr == 0 and cc < woff:
-                        self._pg.addWidget(QLabel(""), ro + rr, cc)
-                    elif day <= md:
-                        leap = False
-                        for r in eng.leap_rules:
-                            if r.month == mi + 1 and eng.is_leap_affected(r, year) and day > eng.months[mi].days:
-                                leap = True
-                        lbl = QLabel(str(day)); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                        lbl.setStyleSheet("color: #0d6efd; font-weight: bold; padding: 2px;" if leap else "padding: 2px;")
-                        self._pg.addWidget(lbl, ro + rr, cc)
-                        day += 1
-                    else:
-                        self._pg.addWidget(QLabel(""), ro + rr, cc)
-            ro += rn + 1
-        self._upd_pv_label(year)
-
-    def _upd_pv_label(self, year: int) -> None:
-        try:
-            eng = CalendarEngine(self._current_calendar_id) if self._current_calendar_id else None
-        except Exception:
-            eng = None
-        if eng and eng.eras:
-            era = None
-            for e in eng.eras:
-                if e.start_year <= year: era = e
-            if era is None and eng.eras: era = eng.eras[0]
-            if era:
-                ey = year - era.start_year + 1 if era.is_primary else era.start_year - year + 1
-                self._lbl_yr.setText(f"Year {ey} {era.abbreviation}")
-                self._preview_year = year
-                return
-        self._lbl_yr.setText(f"Year {year}")
-
-    def _shift_preview(self, d: int) -> None:
-        self._preview_year += d
-        if self._current_calendar_id:
-            self._load_preview(self._current_calendar_id)
 
     # ------------------------------------------------------------------
     # Calendar CRUD
