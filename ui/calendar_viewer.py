@@ -244,7 +244,17 @@ class CalendarViewer(QWidget):
 
         month = months[self._month_index]
         weekdays = self._engine.weekdays
-        nwd = len(weekdays) if weekdays else 7
+
+        # Determine group size: named weekdays take priority, otherwise use
+        # the calendar's days_in_week field (default 7 for plain numbered groups).
+        # This supports calendars with tendays, decades, or other numbered-group systems.
+        if weekdays:
+            nwd = len(weekdays)
+            use_numbered_groups = False
+        else:
+            cal = self._engine.calendar
+            nwd = cal.days_in_week if cal and cal.days_in_week else 7
+            use_numbered_groups = True
 
         # Days in this month (with leap rules)
         md = month.days
@@ -268,8 +278,14 @@ class CalendarViewer(QWidget):
                 ey = self._year - era.start_year + 1 if era.is_primary else era.start_year - self._year + 1
                 self._lbl_era.setText(f"{ey} {era.abbreviation}")
 
-        # Weekday headers (row 0)
-        if weekdays:
+        # Header row (row 0)
+        if use_numbered_groups:
+            for c in range(nwd):
+                lbl = QLabel(str(c + 1))
+                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl.setStyleSheet("font-weight: bold; padding: 3px; background-color: palette(alternate-base); color: gray;")
+                self._grid.addWidget(lbl, 0, c)
+        else:
             for c, wd in enumerate(weekdays):
                 lbl = QLabel(wd.name[:3])
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
