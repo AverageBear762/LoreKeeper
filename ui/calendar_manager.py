@@ -218,8 +218,10 @@ class CalendarManagerDialog(QDialog):
         self._mt.horizontalHeader().resizeSection(2, 80)
         l.addWidget(self._mt)
         r = QHBoxLayout()
-        r.addWidget(self._bma := QPushButton("➕ Add"))
-        r.addWidget(self._bmr := QPushButton("➖ Remove"))
+        self._bma = QPushButton("➕ Add")
+        r.addWidget(self._bma)
+        self._bmr = QPushButton("➖ Remove")
+        r.addWidget(self._bmr)
         r.addStretch()
         l.addLayout(r)
         self._bma.clicked.connect(self._on_add_month)
@@ -237,8 +239,10 @@ class CalendarManagerDialog(QDialog):
         self._wt.horizontalHeader().resizeSection(1, 80)
         l.addWidget(self._wt)
         r = QHBoxLayout()
-        r.addWidget(self._bwa := QPushButton("➕ Add"))
-        r.addWidget(self._bwr := QPushButton("➖ Remove"))
+        self._bwa = QPushButton("➕ Add")
+        r.addWidget(self._bwa)
+        self._bwr = QPushButton("➖ Remove")
+        r.addWidget(self._bwr)
         r.addStretch()
         l.addLayout(r)
         self._bwa.clicked.connect(self._on_add_wd)
@@ -262,8 +266,10 @@ class CalendarManagerDialog(QDialog):
         self._et.horizontalHeader().resizeSection(4, 80)
         l.addWidget(self._et)
         r = QHBoxLayout()
-        r.addWidget(self._bea := QPushButton("➕ Add"))
-        r.addWidget(self._ber := QPushButton("➖ Remove"))
+        self._bea = QPushButton("➕ Add")
+        r.addWidget(self._bea)
+        self._ber = QPushButton("➖ Remove")
+        r.addWidget(self._ber)
         r.addStretch()
         l.addLayout(r)
         self._bea.clicked.connect(self._on_add_era)
@@ -289,9 +295,12 @@ class CalendarManagerDialog(QDialog):
         self._lt.horizontalHeader().resizeSection(5, 80)
         l.addWidget(self._lt)
         r = QHBoxLayout()
-        r.addWidget(self._bla := QPushButton("➕ Add"))
-        r.addWidget(self._blr := QPushButton("➖ Remove"))
-        r.addWidget(self._bvf := QPushButton("🔍 Verify"))
+        self._bla = QPushButton("➕ Add")
+        r.addWidget(self._bla)
+        self._blr = QPushButton("➖ Remove")
+        r.addWidget(self._blr)
+        self._bvf = QPushButton("🔍 Verify")
+        r.addWidget(self._bvf)
         r.addStretch()
         l.addLayout(r)
         self._bla.clicked.connect(self._on_add_leap)
@@ -397,7 +406,14 @@ class CalendarManagerDialog(QDialog):
             self._mt.setItem(i, 0, QTableWidgetItem(m.name))
             di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, m.days)
             self._mt.setItem(i, 1, di)
-            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_month(r))
+            b = QPushButton("🗑")
+            b.clicked.connect(
+                lambda checked=False, button=b: self._delete_row_for_button(
+                    self._mt,
+                    button,
+                    self._del_month,
+                )
+            )
             self._mt.setCellWidget(i, 2, b)
 
     def _load_weekdays(self, cid: str) -> None:
@@ -405,7 +421,14 @@ class CalendarManagerDialog(QDialog):
         self._wt.setRowCount(len(days))
         for i, d in enumerate(days):
             self._wt.setItem(i, 0, QTableWidgetItem(d.name))
-            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_wd(r))
+            b = QPushButton("🗑")
+            b.clicked.connect(
+                lambda checked=False, button=b: self._delete_row_for_button(
+                    self._wt,
+                    button,
+                    self._del_wd
+                )
+            )
             self._wt.setCellWidget(i, 1, b)
 
     def _load_eras(self, cid: str) -> None:
@@ -418,24 +441,64 @@ class CalendarManagerDialog(QDialog):
             self._et.setItem(i, 2, yi)
             cb = QCheckBox(); cb.setChecked(e.is_primary); cb.toggled.connect(self._mark_dirty)
             self._et.setCellWidget(i, 3, cb)
-            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_era(r))
+            b = QPushButton("🗑")
+            b.clicked.connect(
+                lambda checked=False, button=b: self._delete_row_for_button(
+                    self._et,
+                    button,
+                    self._del_era,
+                )
+            )
             self._et.setCellWidget(i, 4, b)
 
     def _load_leaps(self, cid: str) -> None:
         rules = crud.list_leap_year_rules(cid)
         self._lt.setRowCount(len(rules))
-        for i, r in enumerate(rules):
-            tc = QComboBox(); tc.addItems(["interval", "exception"]); tc.setCurrentText(r.rule_type)
-            self._lt.setCellWidget(i, 0, tc)
-            ni = QTableWidgetItem(); ni.setData(Qt.ItemDataRole.DisplayRole, r.interval)
-            self._lt.setItem(i, 1, ni)
-            mi = QTableWidgetItem(); mi.setData(Qt.ItemDataRole.DisplayRole, r.month)
-            self._lt.setItem(i, 2, mi)
-            di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, r.days_to_add)
-            self._lt.setItem(i, 3, di)
-            self._lt.setItem(i, 4, QTableWidgetItem(r.description))
-            b = QPushButton("🗑"); b.clicked.connect(lambda c, r=i: self._del_leap(r))
-            self._lt.setCellWidget(i, 5, b)
+
+        for row, rule in enumerate(rules):
+            type_combo = QComboBox()
+            type_combo.addItems(["interval", "exception"])
+            type_combo.setCurrentText(rule.rule_type)
+            type_combo.currentTextChanged.connect(self._mark_dirty)
+            self._lt.setCellWidget(row, 0, type_combo)
+
+            interval_item = QTableWidgetItem()
+            interval_item.setData(
+                Qt.ItemDataRole.DisplayRole,
+                rule.interval,
+            )
+            self._lt.setItem(row, 1, interval_item)
+
+            month_item = QTableWidgetItem()
+            month_item.setData(
+                Qt.ItemDataRole.DisplayRole,
+                rule.month,
+            )
+            self._lt.setItem(row, 2, month_item)
+
+            days_item = QTableWidgetItem()
+            days_item.setData(
+                Qt.ItemDataRole.DisplayRole,
+                rule.days_to_add,
+            )
+            self._lt.setItem(row, 3, days_item)
+
+            self._lt.setItem(
+                row,
+                4,
+                QTableWidgetItem(rule.description or ""),
+            )
+
+            button = QPushButton("🗑")
+            button.clicked.connect(
+                lambda checked=False, button=button:
+                self._delete_row_for_button(
+                    self._lt,
+                    button,
+                    self._del_leap,
+                )
+            )
+            self._lt.setCellWidget(row, 5, button)
 
     # ------------------------------------------------------------------
     # Preview
@@ -604,9 +667,17 @@ class CalendarManagerDialog(QDialog):
         if cal: self._select_by_name(cal.name)
 
     def _select_by_name(self, name: str) -> None:
-        for prefix in ("", "⭐ "):
-            idx = self._cal_list.findText(f"{prefix}{name}", Qt.MatchFlag.MatchExactly)
-            if idx >= 0: self._cal_list.setCurrentRow(idx); return
+        for row in range(self._cal_list.count()):
+            item = self._cal_list.item(row)
+            if item is None:
+                continue
+
+            calendar_id = item.data(Qt.ItemDataRole.UserRole)
+            calendar = crud.get_calendar(calendar_id)
+
+            if calendar and calendar.name == name:
+                self._cal_list.setCurrentRow(row)
+                return
 
     def _select_by_id(self, cid: str) -> None:
         for i in range(self._cal_list.count()):
@@ -717,60 +788,175 @@ class CalendarManagerDialog(QDialog):
     # Entity CRUD helpers
     # ------------------------------------------------------------------
 
+    def _delete_row_for_button(
+        self,
+        table: QTableWidget,
+        button: QPushButton,
+        delete_method: Any,
+    ) -> None:
+        index = table.indexAt(button.pos())
+        if index.isValid():
+            delete_method(index.row())
+
+
     def _on_add_month(self) -> None:
-        r = self._mt.rowCount(); self._mt.insertRow(r)
-        self._mt.setItem(r, 0, QTableWidgetItem("New Month"))
-        di = QTableWidgetItem(); di.setData(Qt.ItemDataRole.DisplayRole, 30); self._mt.setItem(r, 1, di)
-        b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_month(r)); self._mt.setCellWidget(r, 2, b)
+        row = self._mt.rowCount()
+        self._mt.insertRow(row)
+
+        self._mt.setItem(
+            row,
+            0,
+            QTableWidgetItem("New Month"),
+        )
+
+        days_item = QTableWidgetItem()
+        days_item.setData(Qt.ItemDataRole.DisplayRole, 30)
+        self._mt.setItem(row, 1, days_item)
+
+        button = QPushButton("🗑")
+        button.clicked.connect(
+            lambda checked=False, button=button:
+            self._delete_row_for_button(
+                self._mt,
+                button,
+                self._del_month,
+            )
+        )
+        self._mt.setCellWidget(row, 2, button)
+
         self._dirty = True
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     def _on_rem_month(self) -> None:
         for r in sorted({it.row() for it in self._mt.selectedItems()}, reverse=True): self._del_month(r)
 
-    def _del_month(self, r: int) -> None:
-        if 0 <= r < self._mt.rowCount(): self._mt.removeRow(r); self._dirty = True
+    def _del_month(self, row: int) -> None:
+        if 0 <= row < self._mt.rowCount():
+            self._mt.removeRow(row)
+            self._dirty = True
+            if self._current_calendar_id:
+                self._load_preview(self._current_calendar_id)
 
     def _on_add_wd(self) -> None:
-        r = self._wt.rowCount(); self._wt.insertRow(r)
-        self._wt.setItem(r, 0, QTableWidgetItem("New Day"))
-        b = QPushButton("🗑"); b.clicked.connect(lambda: self._del_wd(r)); self._wt.setCellWidget(r, 1, b)
+        row = self._wt.rowCount()
+        self._wt.insertRow(row)
+
+        self._wt.setItem(
+            row,
+            0,
+            QTableWidgetItem("New Day"),
+        )
+
+        button = QPushButton("🗑")
+        button.clicked.connect(
+            lambda checked=False, button=button:
+            self._delete_row_for_button(
+                self._wt,
+                button,
+                self._del_wd,
+            )
+        )
+        self._wt.setCellWidget(row, 1, button)
+
         self._dirty = True
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     def _on_rem_wd(self) -> None:
         for r in sorted({it.row() for it in self._wt.selectedItems()}, reverse=True): self._del_wd(r)
 
-    def _del_wd(self, r: int) -> None:
-        if 0 <= r < self._wt.rowCount(): self._wt.removeRow(r); self._dirty = True
+    def _del_wd(self, row: int) -> None:
+        if 0 <= row < self._wt.rowCount():
+            self._wt.removeRow(row)
+            self._dirty = True
+            if self._current_calendar_id:
+                self._load_preview(self._current_calendar_id)
 
     def _on_add_era(self) -> None:
-        r = self._et.rowCount(); self._et.insertRow(r)
-        self._et.setItem(r, 0, QTableWidgetItem("New Era"))
-        self._et.setItem(r, 1, QTableWidgetItem("NE"))
-        yi = QTableWidgetItem(); yi.setData(Qt.ItemDataRole.DisplayRole, 1); self._et.setItem(r, 2, yi)
-        self._et.setCellWidget(r, 3, QCheckBox())
-        b = QPushButton("🗑"); self._et.setCellWidget(r, 4, b)
+        row = self._et.rowCount()
+        self._et.insertRow(row)
+
+        self._et.setItem(row, 0, QTableWidgetItem("New Era"))
+        self._et.setItem(row, 1, QTableWidgetItem("NE"))
+
+        year_item = QTableWidgetItem()
+        year_item.setData(Qt.ItemDataRole.DisplayRole, 1)
+        self._et.setItem(row, 2, year_item)
+
+        checkbox = QCheckBox()
+        checkbox.toggled.connect(self._mark_dirty)
+        self._et.setCellWidget(row, 3, checkbox)
+
+        button = QPushButton("🗑")
+        button.clicked.connect(
+            lambda checked=False, button=button:
+            self._delete_row_for_button(
+                self._et,
+                button,
+                self._del_era,
+            )
+        )
+        self._et.setCellWidget(row, 4, button)
+
         self._dirty = True
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     def _on_rem_era(self) -> None:
         for r in sorted({it.row() for it in self._et.selectedItems()}, reverse=True): self._del_era(r)
 
-    def _del_era(self, r: int) -> None:
-        if 0 <= r < self._et.rowCount(): self._et.removeRow(r); self._dirty = True
+    def _del_era(self, row: int) -> None:
+        if 0 <= row < self._et.rowCount():
+            self._et.removeRow(row)
+            self._dirty = True
+            if self._current_calendar_id:
+                self._load_preview(self._current_calendar_id)
 
     def _on_add_leap(self) -> None:
-        r = self._lt.rowCount(); self._lt.insertRow(r)
-        tc = QComboBox(); tc.addItems(["interval", "exception"]); self._lt.setCellWidget(r, 0, tc)
-        for c, v in [(1, 4), (2, 2), (3, 1)]:
-            it = QTableWidgetItem(); it.setData(Qt.ItemDataRole.DisplayRole, v); self._lt.setItem(r, c, it)
-        self._lt.setItem(r, 4, QTableWidgetItem(""))
-        b = QPushButton("🗑"); self._lt.setCellWidget(r, 5, b)
+        row = self._lt.rowCount()
+        self._lt.insertRow(row)
+
+        type_combo = QComboBox()
+        type_combo.addItems(["interval", "exception"])
+        type_combo.currentTextChanged.connect(self._mark_dirty)
+        self._lt.setCellWidget(row, 0, type_combo)
+
+        for column, value in [
+            (1, 4),
+            (2, 2),
+            (3, 1),
+        ]:
+            item = QTableWidgetItem()
+            item.setData(Qt.ItemDataRole.DisplayRole, value)
+            self._lt.setItem(row, column, item)
+
+        self._lt.setItem(row, 4, QTableWidgetItem(""))
+
+        button = QPushButton("🗑")
+        button.clicked.connect(
+            lambda checked=False, button=button:
+            self._delete_row_for_button(
+                self._lt,
+                button,
+                self._del_leap,
+            )
+        )
+        self._lt.setCellWidget(row, 5, button)
+
         self._dirty = True
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     def _on_rem_leap(self) -> None:
         for r in sorted({it.row() for it in self._lt.selectedItems()}, reverse=True): self._del_leap(r)
 
-    def _del_leap(self, r: int) -> None:
-        if 0 <= r < self._lt.rowCount(): self._lt.removeRow(r); self._dirty = True
+    def _del_leap(self, row: int) -> None:
+        if 0 <= row < self._lt.rowCount():
+            self._lt.removeRow(row)
+            self._dirty = True
+            if self._current_calendar_id:
+                self._load_preview(self._current_calendar_id)
 
     def _on_verify(self) -> None:
         if not self._current_calendar_id: return
@@ -784,7 +970,10 @@ class CalendarManagerDialog(QDialog):
             if res["warnings"]: m += "\n\nWarnings:\n" + "\n".join(res["warnings"])
             QMessageBox.warning(self, "Verify", m)
 
-    def _mark_dirty(self, *_: Any) -> None: self._dirty = True
+    def _mark_dirty(self, *_: Any) -> None:
+        self._dirty = True
+        if self._current_calendar_id:
+            self._load_preview(self._current_calendar_id)
 
     def closeEvent(self, event: Any) -> None:
         if self._dirty:
