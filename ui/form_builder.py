@@ -256,7 +256,7 @@ class DynamicForm(QScrollArea):
         self._field_widgets = []
         values = current_values or {}
 
-        for fd in template.field_definitions:
+        for fd in template.enabled_field_definitions():
             fw = FormFieldWidget(fd, values.get(fd.name))
             fw.value_changed.connect(self.value_changed.emit)
             self._field_widgets.append(fw)

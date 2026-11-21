@@ -131,6 +131,21 @@ class FieldDefinition:
     required: bool = False
     options: list[str] = field(default_factory=list)  # for 'select' type
     placeholder: str = ""
+    enabled: bool = True  # a disabled section is hidden in the article editor
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FieldDefinition":
+        """Build a FieldDefinition from stored JSON.
+
+        A missing (or null) ``enabled`` key means enabled, so templates saved
+        before configurable sections existed keep every section switched on.
+        """
+        kwargs = {
+            k: v for k, v in data.items() if k in cls.__dataclass_fields__
+        }
+        if kwargs.get("enabled") is None:
+            kwargs["enabled"] = True
+        return cls(**kwargs)
 
 
 @dataclass
@@ -155,7 +170,7 @@ class ArticleTemplate:
     def from_row(cls, row: dict[str, Any]) -> ArticleTemplate:
         raw_fields = _json_deserialise(row.get("field_definitions")) or []
         fields = [
-            FieldDefinition(**fd) if isinstance(fd, dict) else fd
+            FieldDefinition.from_dict(fd) if isinstance(fd, dict) else fd
             for fd in raw_fields
         ]
         return cls(
@@ -165,6 +180,14 @@ class ArticleTemplate:
             created_at=row.get("created_at", ""),
             updated_at=row.get("updated_at", ""),
         )
+
+    def enabled_field_definitions(self) -> list[FieldDefinition]:
+        """Return only the sections the user has switched on.
+
+        This is what every UI surface that presents sections to the user
+        (article form panel, hover preview, exports) should render.
+        """
+        return [fd for fd in self.field_definitions if getattr(fd, "enabled", True)]
 
     def touch(self) -> None:
         self.updated_at = _now()
