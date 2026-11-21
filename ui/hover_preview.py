@@ -274,10 +274,10 @@ class HoverPreviewWidget(QFrame):
         if hasattr(self, config_key):
             return getattr(self, config_key)
 
-        # Default: first 4 fields from the template
+        # Default: first 4 fields from the template (disabled sections skipped)
         template = self._template
-        if template and template.field_definitions:
-            names = [fd.name for fd in template.field_definitions[:4]]
+        if template:
+            names = [fd.name for fd in template.enabled_field_definitions()[:4]]
         else:
             names = []
         return names

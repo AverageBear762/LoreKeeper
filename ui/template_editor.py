@@ -103,6 +103,16 @@ class FieldEditorRow(QWidget):
         self.required_cb.setChecked(self._def.required)
         layout.addWidget(self.required_cb)
 
+        # Section enabled checkbox (disabled sections are hidden in articles)
+        self.enabled_cb = QCB("Enabled")
+        self.enabled_cb.setToolTip(
+            "Section enabled — uncheck to hide this section from articles "
+            "using this template. Stored values are kept."
+        )
+        self.enabled_cb.setChecked(getattr(self._def, "enabled", True))
+        self.enabled_cb.toggled.connect(self._on_enabled_toggled)
+        layout.addWidget(self.enabled_cb)
+
         # Remove button
         self.remove_btn = QPushButton("✕")
         self.remove_btn.setMaximumWidth(28)
@@ -112,6 +122,9 @@ class FieldEditorRow(QWidget):
         )
         self.remove_btn.clicked.connect(lambda: self.removed.emit(self))
         layout.addWidget(self.remove_btn)
+
+        # Reflect the stored state (dim the row if the section is switched off)
+        self._on_enabled_toggled(self.enabled_cb.isChecked())
 
     def _on_type_changed(self, idx: int) -> None:
         """Show/hide options editor for 'select' type."""
@@ -150,6 +163,25 @@ class FieldEditorRow(QWidget):
             ]
             self._def.options = new_options
 
+    def _on_enabled_toggled(self, checked: bool) -> None:
+        """Dim the row's other controls while the section is switched off.
+
+        The checkbox itself stays usable so the section can be re-enabled.
+        """
+        for widget in (
+            self.name_edit,
+            self.label_edit,
+            self.type_combo,
+            self.edit_options_btn,
+            self.required_cb,
+        ):
+            widget.setEnabled(checked)
+        self.setStyleSheet(
+            "" if checked else
+            "QLineEdit:disabled, QComboBox:disabled, QCheckBox:disabled,"
+            " QPushButton:disabled { color: #adb5bd; }"
+        )
+
     def get_field_definition(self) -> FieldDefinition:
         raw_name = self.name_edit.text().strip()
         raw_label = self.label_edit.text().strip()
@@ -160,6 +192,7 @@ class FieldEditorRow(QWidget):
             required=self.required_cb.isChecked(),
             options=self._def.options if self._def.field_type == "select" else [],
             placeholder="",
+            enabled=self.enabled_cb.isChecked(),
         )
 
 

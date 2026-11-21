@@ -457,7 +457,11 @@ class ArticleView(QFrame):
 
         self._article.title = new_title
         self._article.content = new_content
-        self._article.template_fields = self.template_fields_panel.get_values()
+        # Merge instead of replace: sections that are currently disabled in the
+        # template are not on screen, so their stored values must survive a save.
+        merged_fields = dict(self._article.template_fields or {})
+        merged_fields.update(self.template_fields_panel.get_values())
+        self._article.template_fields = merged_fields
         self._article.touch()
 
         crud.update_article(self._article)

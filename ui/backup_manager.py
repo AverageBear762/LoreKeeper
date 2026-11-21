@@ -27,6 +27,7 @@ from database.manager import DatabaseManager
 from database.models import (
     Article,
     ArticleTemplate,
+    FieldDefinition,
     MapConnection,
     MapNode,
     _now,
@@ -144,7 +145,7 @@ class BackupManager:
             existing = crud.get_template(tdata["id"])
             if not existing and not crud.get_template_by_type_name(tdata["type_name"]):
                 fields = [
-                    crud.FieldDefinition(**fd) if isinstance(fd, dict) else fd
+                    FieldDefinition.from_dict(fd) if isinstance(fd, dict) else fd
                     for fd in tdata.get("field_definitions", [])
                 ]
                 template = ArticleTemplate(
