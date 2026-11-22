@@ -209,10 +209,16 @@ class HoverPreviewWidget(QFrame):
         self.title_label.setText(article.title or "Untitled")
         self.type_label.setText(article.article_type)
 
-        # Portrait / image
-        portrait_path = article.template_fields.get("portrait", "") or \
-                        article.template_fields.get("image", "") or \
-                        article.template_fields.get("map_image", "") or ""
+        # Portrait / image — only from a section the template still shows
+        portrait_path = ""
+        enabled = self._enabled_field_names()
+        for image_field in ("portrait", "image", "map_image"):
+            if enabled is not None and image_field not in enabled:
+                continue
+            candidate = article.template_fields.get(image_field, "") or ""
+            if candidate:
+                portrait_path = candidate
+                break
         if portrait_path and os.path.isfile(portrait_path):
             pix = QPixmap(portrait_path)
             if not pix.isNull():
@@ -263,24 +269,41 @@ class HoverPreviewWidget(QFrame):
             summary += "..."
         self.summary_label.setText(summary if summary else "")
 
+    def _enabled_field_names(self) -> Optional[set[str]]:
+        """Names of the sections the template currently has switched on.
+
+        Returns ``None`` when the article type has no template at all, so
+        callers can tell "nothing is enabled" apart from "no template to
+        filter against" (built-in types without a schema).
+        """
+        template = self._template
+        if not template:
+            return None
+        return {fd.name for fd in template.enabled_field_definitions()}
+
     def _get_visible_fields(self, article_type: str) -> list[str]:
         """Return the list of field names to display in the preview.
 
         Checks for a saved configuration per template. Falls back to
         the first 4 fields of the template definition.
         """
-        # Check for saved config
+        enabled = self._enabled_field_names()
+
+        # Check for saved config — a saved list may name sections that have
+        # been switched off since it was written, so filter it.
         config_key = f"_preview_fields_{article_type}"
         if hasattr(self, config_key):
-            return getattr(self, config_key)
+            saved = list(getattr(self, config_key) or [])
+            if enabled is None:
+                return saved
+            return [name for name in saved if name in enabled]
 
         # Default: first 4 fields from the template (disabled sections skipped)
-        template = self._template
-        if template:
-            names = [fd.name for fd in template.enabled_field_definitions()[:4]]
-        else:
-            names = []
-        return names
+        if enabled is not None:
+            return [
+                fd.name for fd in self._template.enabled_field_definitions()[:4]
+            ]
+        return []
 
     def configure_preview_fields(
         self, article_type: str, field_names: list[str]
